@@ -35,17 +35,21 @@
 				/* 长文本行宽上限：大屏下不让用户提问的气泡一行拉满 */
 				--line-max: 90ch;
 				/* 浮层（纸面）令牌：圆角、极细描边、双层柔影、遮罩、入场动效 */
-				--sheet-radius: 12px;
-				--sheet-line: rgba(43, 54, 62, 0.1);
-				--sheet-shadow: 0 1px 2px rgba(22, 25, 28, 0.06), 0 18px 40px -12px rgba(22, 25, 28, 0.28);
-				--scrim: rgba(22, 25, 28, 0.32);
-				--sheet-enter: 120ms;
+				--sheet-radius: 16px;
+				--sheet-line: rgba(43, 54, 62, 0.07);
+				--sheet-shadow: 0 2px 6px rgba(22, 25, 28, 0.1), 0 32px 64px -24px rgba(22, 25, 28, 0.42);
+				/* 浮层内顶边 1px 高光：浅色底上把纸面“抬”起来 */
+				--sheet-hairline: rgba(255, 255, 255, 0.9);
+				--scrim: rgba(22, 25, 28, 0.45);
+				--sheet-enter: 160ms;
+				/* 选中块的内缩圆角 */
+				--sheet-item-radius: 10px;
 				/* 浮层宽度分档：插件对话框 / 列表类内容 / 多块内容（额度） */
 				--sheet-w: clamp(320px, 92vw, 560px);
 				--sheet-w-list: clamp(320px, 92vw, 640px);
 				--sheet-w-wide: clamp(320px, 94vw, 720px);
 				/* 浮层横向留白：头部、列表、字段、底部统一用这一个值 */
-				--sheet-pad-x: 12px;
+				--sheet-pad-x: 14px;
 			}
 			* {
 				box-sizing: border-box;
@@ -632,6 +636,9 @@
 				display: flex;
 				flex-direction: column;
 				gap: 4px;
+				padding: 10px 12px;
+				border-radius: 10px;
+				background: var(--think-bg);
 			}
 			.usage-section h4 {
 				margin: 0 0 4px;
@@ -650,7 +657,172 @@
 			}
 			.usage-note.error { color: var(--accent); }
 			.usage-note.warn { color: var(--tool); }
+			/* 指标行：标签淡、数值实（↑ 12.3K 这种） */
+			.usage-metrics {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 4px 12px;
+				font: 12px/1.7 var(--mono);
+			}
+			.metric {
+				display: inline-flex;
+				align-items: baseline;
+				gap: 3px;
+				color: var(--muted);
+			}
+			.metric b {
+				color: var(--text);
+				font-weight: 600;
+				font-variant-numeric: tabular-nums;
+			}
+			/* 进度行：标签 | 条 | 百分比 | 重置倒计时 */
+			.usage-row {
+				display: grid;
+				grid-template-columns: 64px minmax(0, 1fr) 54px auto;
+				align-items: center;
+				gap: 0 10px;
+				font: 12px/1.7 var(--mono);
+				color: var(--text);
+			}
+			.usage-label {
+				color: var(--muted);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.usage-bar {
+				height: 6px;
+				border-radius: 999px;
+				background: rgba(43, 54, 62, 0.1);
+				overflow: hidden;
+			}
+			.usage-fill {
+				display: block;
+				height: 100%;
+				border-radius: 999px;
+				background: var(--tool);
+				transition: width 200ms ease-out;
+			}
+			/* 三档：正常青 / 警告淡红 / 危险正红（与页面错误色一致） */
+			.usage-fill.warn { background: rgba(194, 64, 42, 0.45); }
+			.usage-fill.danger { background: var(--accent); }
+			.usage-value {
+				text-align: right;
+				font-variant-numeric: tabular-nums;
+			}
+			.usage-when {
+				font-size: 11px;
+				color: var(--faint);
+				white-space: nowrap;
+			}
+			@media (prefers-reduced-motion: reduce) {
+				.usage-fill { transition: none; }
+			}
 			#usageFoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+			/* ---------- 浮层内容：两行式条目 ---------- */
+			.picker-item.two-line { grid-template-columns: 26px minmax(0, 1fr); }
+			.picker-item .main {
+				display: flex;
+				flex-direction: column;
+				gap: 2px;
+				min-width: 0;
+				padding: 9px 0;
+			}
+			.picker-item .title {
+				min-width: 0;
+				font-size: 13px;
+				color: var(--text);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			/* 目录/回退的提问文本允许最多两行 */
+			.picker-item .title.clamp-2 {
+				display: -webkit-box;
+				-webkit-line-clamp: 2;
+				-webkit-box-orient: vertical;
+				white-space: normal;
+			}
+			.picker-item .meta {
+				display: flex;
+				align-items: center;
+				flex-wrap: wrap;
+				gap: 3px 8px;
+				min-width: 0;
+				font: 11px/1.5 var(--mono);
+				color: var(--faint);
+			}
+			/* 小标签胶囊：provider / 思考 / 200K / 默认 / 当前位置 */
+			.chip {
+				padding: 1px 6px;
+				border: 1px solid var(--line);
+				border-radius: 999px;
+				background: var(--panel);
+				color: var(--muted);
+				font: 10.5px/1.6 var(--mono);
+				white-space: nowrap;
+			}
+			.chip.accent {
+				border-color: rgba(194, 64, 42, 0.35);
+				color: var(--accent);
+			}
+			/* 序号胶囊（目录 / 回退 / 插件选项） */
+			.mark.idx {
+				display: inline-flex;
+				align-items: center;
+				justify-content: center;
+				min-width: 22px;
+				height: 18px;
+				padding: 0 5px;
+				border-radius: 6px;
+				background: var(--think-bg);
+				color: var(--muted);
+				font: 10.5px/1 var(--mono);
+			}
+			.picker-item[data-active="true"] .mark.idx {
+				background: rgba(194, 64, 42, 0.12);
+				color: var(--accent);
+			}
+			/* 目录里“当前可视区域第一条” */
+			.picker-item[data-viewport="true"] { border-left-color: var(--line-strong); }
+			/* 会话列表的分组标题（今天 / 昨天 / 更早） */
+			.picker-group {
+				margin: 0 4px;
+				padding: 8px 7px 4px;
+				font: 10.5px/1.4 var(--mono);
+				letter-spacing: 0.08em;
+				color: var(--faint);
+			}
+			/* confirm 对话框里默认高亮的那一项（确认） */
+			.picker-item.confirm-primary .title {
+				color: var(--accent);
+				font-weight: 600;
+			}
+			/* 插件对话框的超时进度 */
+			.ui-timeout {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+			}
+			.ui-timeout-track {
+				flex: none;
+				width: 120px;
+				height: 4px;
+				border-radius: 999px;
+				background: rgba(194, 64, 42, 0.18);
+				overflow: hidden;
+			}
+			.ui-timeout-fill {
+				display: block;
+				height: 100%;
+				border-radius: 999px;
+				background: var(--accent);
+				transition: width 200ms linear;
+			}
+			@media (prefers-reduced-motion: reduce) {
+				.ui-timeout-fill { transition: none; }
+			}
 
 			/* ---------- 待发附件（图片缩略图 / 文本文件名） ---------- */
 			.attach-strip {
@@ -824,7 +996,8 @@
 				justify-content: center;
 				padding: clamp(24px, 7vh, 56px) var(--stage-pad) 16px;
 				background: var(--scrim);
-				backdrop-filter: blur(2px);
+				/* 模糊吃 GPU：远程桌面/低端机发卡的话降回 blur(2px) */
+				backdrop-filter: blur(6px) saturate(1.05);
 			}
 			.overlay[hidden] {
 				display: none;
@@ -837,16 +1010,17 @@
 				background: var(--panel);
 				border: 1px solid var(--sheet-line);
 				border-radius: var(--sheet-radius);
-				box-shadow: var(--sheet-shadow);
+				box-shadow: inset 0 1px 0 var(--sheet-hairline), var(--sheet-shadow);
 				overflow: hidden;
-				animation: sheetIn var(--sheet-enter) ease-out;
+				transform-origin: top center;
+				animation: sheetIn var(--sheet-enter) cubic-bezier(0.2, 0.9, 0.25, 1);
 			}
 			/* 容器只为程序性聚焦，不画焦点环；环留给内部真正可操作的控件 */
 			.picker:focus { outline: none; }
 			.picker.w-list { width: var(--sheet-w-list); }
 			.picker.w-wide { width: var(--sheet-w-wide); }
 			@keyframes sheetIn {
-				from { opacity: 0; transform: translateY(6px); }
+				from { opacity: 0; transform: translateY(10px) scale(0.99); }
 				to { opacity: 1; transform: none; }
 			}
 			.picker-head {
@@ -865,7 +1039,7 @@
 			}
 			.picker-title {
 				min-width: 0;
-				font: 600 12.5px/1.2 var(--sans);
+				font: 600 13px/1.2 var(--sans);
 				color: var(--text);
 			}
 			.picker-key {
@@ -875,8 +1049,8 @@
 			/* 关闭按钮与浮层里的小按钮共用一套 */
 			.picker-close {
 				flex: none;
-				width: 24px;
-				height: 24px;
+				width: 26px;
+				height: 26px;
 				padding: 0;
 				display: flex;
 				align-items: center;
@@ -886,13 +1060,13 @@
 				font: 12px/1 var(--sans);
 			}
 			.picker-close:hover {
-				background: var(--think-bg);
-				color: var(--text);
+				background: rgba(194, 64, 42, 0.1);
+				color: var(--accent);
 			}
 			.sheet-btn {
 				padding: 4px 10px;
 				border: 1px solid var(--line-strong);
-				border-radius: 8px;
+				border-radius: 10px;
 				color: var(--muted);
 				font: 11px/1.4 var(--mono);
 			}
@@ -914,9 +1088,9 @@
 			.picker-search {
 				flex: none;
 				margin: 12px var(--sheet-pad-x) 0;
-				padding: 8px 10px;
+				padding: 9px 11px;
 				border: 1px solid var(--line-strong);
-				border-radius: 8px;
+				border-radius: 10px;
 				background: var(--panel);
 				color: var(--text);
 				font: 13px/1.4 var(--mono);
@@ -965,41 +1139,37 @@
 			.picker-list {
 				list-style: none;
 				margin: 0;
-				padding: 4px 0;
+				padding: 6px 0;
 				overflow-y: auto;
 			}
 			.picker-item {
 				display: grid;
 				grid-template-columns: 14px minmax(0, 1fr) auto;
 				gap: 0 10px;
-				align-items: baseline;
-				padding: 8px 12px;
+				align-items: center;
+				min-height: 40px;
+				/* 整块内缩：选中时用浅底 + 左红条标记，不需要额外的选中行背景 */
+				margin: 0 4px;
+				padding: 0 7px;
+				/* 预留红条位置，选中时文字不会左右跳动 */
+				border-left: 3px solid transparent;
+				border-radius: var(--sheet-item-radius);
 				cursor: pointer;
 			}
 			.picker-item:hover {
 				background: var(--think-bg);
 			}
 			.picker-item[data-active="true"] {
-				background: var(--think-bg);
-				box-shadow: inset 3px 0 0 var(--accent);
+				background: rgba(194, 64, 42, 0.08);
+				border-left-color: var(--accent);
 			}
 			.picker-item .mark {
 				color: var(--accent);
 				font: 10px/1.7 var(--mono);
 			}
-			.picker-item .text {
-				min-width: 0;
-				overflow: hidden;
-				text-overflow: ellipsis;
-				white-space: nowrap;
-			}
-			.picker-item .time {
-				font: 11px/1.6 var(--mono);
-				color: var(--faint);
-				white-space: nowrap;
-			}
 			.picker-item.plain {
 				grid-template-columns: minmax(0, 1fr);
+				padding: 8px 7px;
 				color: var(--faint);
 				font-size: 13px;
 				cursor: default;
@@ -1008,7 +1178,7 @@
 				background: none;
 			}
 			.picker-foot {
-				padding: 8px 12px;
+				padding: 10px var(--sheet-pad-x);
 				border-top: 1px solid var(--line);
 				font: 11px/1.4 var(--mono);
 				color: var(--faint);
@@ -1031,7 +1201,7 @@
 				margin: 12px var(--sheet-pad-x);
 				padding: 8px 10px;
 				border: 1px solid var(--line-strong);
-				border-radius: 8px;
+				border-radius: 10px;
 				background: var(--panel);
 				color: var(--text);
 				font: 13px/1.5 var(--mono);
@@ -1342,6 +1512,8 @@
 			let navOpen = false;
 			let navItems = [];
 			let navIndex = 0;
+			/** 打开目录时当前可视区域最靠上的那条（只用于标记“当前位置”，不随方向键变）。 */
+			let navViewportIndex = 0;
 			/** 回退浮层（/rewind）状态。 */
 			let rewindOpen = false;
 			let rewindItems = [];
@@ -2371,6 +2543,27 @@
 			}
 
 			/** 渲染会话列表（含高亮与滚动定位）。传 message 则只显示一行说明。 */
+			/** 小标签胶囊；when 为假时返回 null，方便和别的节点一起 append 时过滤。 */
+			function chip(text, when = true, extraClass = '') {
+				if (!when) return null;
+				const node = document.createElement('span');
+				node.className = 'chip' + (extraClass ? ' ' + extraClass : '');
+				node.textContent = text;
+				return node;
+			}
+
+			/** 会话列表按修改时间分组：今天 / 昨天 / 更早。 */
+			function sessionGroupOf(value) {
+				const at = new Date(value || 0).getTime();
+				if (!Number.isFinite(at)) return '更早';
+				const now = new Date();
+				const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+				if (at >= todayStart) return '今天';
+				if (at >= todayStart - 86400000) return '昨天';
+				return '更早';
+			}
+
+			/** 渲染会话选择器：两行式条目（标题 + 时间/条数），并按时间分组。 */
 			function renderPicker(message) {
 				pickerListEl.replaceChildren();
 				const plain = (text) => {
@@ -2381,24 +2574,39 @@
 				};
 				if (message) return plain(message);
 				if (!pickerItems.length) return plain('这个目录还没有历史会话');
+				let group = '';
 				pickerItems.forEach((info, index) => {
+					const nextGroup = sessionGroupOf(info.modified);
+					if (nextGroup !== group) {
+						group = nextGroup;
+						const head = document.createElement('li');
+						head.className = 'picker-group';
+						head.textContent = group;
+						pickerListEl.append(head);
+					}
 					const item = document.createElement('li');
-					item.className = 'picker-item';
+					item.className = 'picker-item two-line';
+					item.dataset.index = String(index);
 					item.dataset.active = String(index === pickerIndex);
 					const mark = document.createElement('span');
 					mark.className = 'mark';
 					mark.textContent = samePath(info.path, currentSessionPath) ? '●' : '';
-					const text = document.createElement('span');
-					text.className = 'text';
-					text.textContent = String(info.name || info.firstMessage || info.id || '(空会话)').slice(0, 120);
-					const time = document.createElement('span');
-					time.className = 'time';
-					time.textContent = shortTime(info.modified) + ' · ' + (info.messageCount || 0) + ' 条';
-					item.append(mark, text, time);
+					const main = document.createElement('span');
+					main.className = 'main';
+					const title = document.createElement('span');
+					title.className = 'title';
+					title.textContent = String(info.name || info.firstMessage || info.id || '(空会话)').slice(0, 120);
+					title.title = title.textContent;
+					const meta = document.createElement('span');
+					meta.className = 'meta';
+					meta.textContent = shortTime(info.modified) + ' · ' + (info.messageCount || 0) + ' 条';
+					main.append(title, meta);
+					item.append(mark, main);
 					item.addEventListener('click', () => void switchSession(info.path));
 					pickerListEl.append(item);
 				});
-				const active = pickerListEl.children[pickerIndex];
+				// 列表里插了分组标题，不能按下标取 child，按 data-index 找
+				const active = pickerListEl.querySelector('.picker-item[data-index="' + pickerIndex + '"]');
 				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
 			}
 
@@ -2606,26 +2814,26 @@
 				if (modelIndex >= visible.length || modelIndex < 0) modelIndex = 0;
 				visible.forEach((model, index) => {
 					const item = document.createElement('li');
-					item.className = 'picker-item';
+					item.className = 'picker-item two-line';
 					item.dataset.active = String(index === modelIndex);
 					const mark = document.createElement('span');
 					mark.className = 'mark';
 					mark.textContent = modelKey(model) === currentModelKey ? '●' : '';
-					const text = document.createElement('span');
-					text.className = 'text';
-					text.textContent =
-						model.name && model.name !== model.id
-							? model.provider + '/' + model.id + ' · ' + model.name
-							: modelKey(model);
-					text.title = text.textContent;
-					const time = document.createElement('span');
-					time.className = 'time';
-					const flags = [];
-					if (model.reasoning) flags.push('思考');
-					if (model.contextWindow) flags.push(formatContext(model.contextWindow));
-					if (modelKey(model) === defaultModelKey) flags.push('默认');
-					time.textContent = flags.join(' · ');
-					item.append(mark, text, time);
+					const main = document.createElement('span');
+					main.className = 'main';
+					const title = document.createElement('span');
+					title.className = 'title';
+					title.textContent = model.name && model.name !== model.id ? model.name : modelKey(model);
+					title.title = modelKey(model) + (model.name && model.name !== model.id ? ' · ' + model.name : '');
+					const meta = document.createElement('span');
+					meta.className = 'meta';
+					const source = document.createElement('span');
+					source.textContent = model.provider + ' · ' + model.id;
+					meta.append(
+						...[source, chip('思考', Boolean(model.reasoning)), chip(formatContext(model.contextWindow), Boolean(model.contextWindow)), chip('默认', modelKey(model) === defaultModelKey, 'accent')].filter(Boolean),
+					);
+					main.append(title, meta);
+					item.append(mark, main);
 					item.addEventListener('click', () => void switchModel(model, false));
 					modelListEl.append(item);
 				});
@@ -3141,15 +3349,26 @@
 				if (!navItems.length) return plain('这个会话还没有消息');
 				navItems.forEach((item, index) => {
 					const li = document.createElement('li');
-					li.className = 'picker-item';
+					li.className = 'picker-item two-line';
 					li.dataset.active = String(index === navIndex);
+					li.dataset.viewport = String(index === navViewportIndex);
 					const mark = document.createElement('span');
-					mark.className = 'mark';
+					mark.className = 'mark idx';
 					mark.textContent = item.idx;
-					const text = document.createElement('span');
-					text.className = 'text';
-					text.textContent = item.text;
-					li.append(mark, text);
+					const main = document.createElement('span');
+					main.className = 'main';
+					const title = document.createElement('span');
+					title.className = 'title clamp-2';
+					title.textContent = item.text;
+					main.append(title);
+					// 标一下打开目录时视图所在的位置，和方向键高亮是两回事
+					if (index === navViewportIndex) {
+						const meta = document.createElement('span');
+						meta.className = 'meta';
+						meta.append(chip('当前位置', true, 'accent'));
+						main.append(meta);
+					}
+					li.append(mark, main);
 					li.addEventListener('click', () => jumpToRow(item.row));
 					navListEl.append(li);
 				});
@@ -3162,7 +3381,8 @@
 				navItems = collectNavItems();
 				const top = messagesEl.scrollTop;
 				const at = navItems.findIndex((item) => item.row.offsetTop >= top - 4);
-				navIndex = at >= 0 ? at : 0;
+				navViewportIndex = at >= 0 ? at : 0;
+				navIndex = navViewportIndex;
 				navOpen = true;
 				navOverlayEl.hidden = false;
 				enterSheet(navOverlayEl);
@@ -3196,10 +3416,13 @@
 
 			/** 收集可回退的用户提问：只取有会话条目 id 的行；本地回显尚未拿到 id、或旧版本 SDK 不给 id 时不参与。 */
 			function collectRewindItems() {
-				return [...messagesEl.querySelectorAll('.row.user[data-entry-id]')].map((row) => ({
+				const rows = [...messagesEl.querySelectorAll('.row.user[data-entry-id]')];
+				return rows.map((row, index) => ({
 					row,
 					entryId: row.dataset.entryId,
 					idx: row.querySelector('.idx') ? row.querySelector('.idx').textContent : '',
+					// 回退到这条之前，后面这些提问都会被移出上下文
+					after: rows.length - index - 1,
 					text:
 						String(row.querySelector('.body') ? row.querySelector('.body').textContent : '')
 							.replace(/\s+/g, ' ')
@@ -3221,15 +3444,22 @@
 				if (!rewindItems.length) return plain('这个会话还没有可以回退的提问');
 				rewindItems.forEach((item, index) => {
 					const li = document.createElement('li');
-					li.className = 'picker-item';
+					li.className = 'picker-item two-line';
 					li.dataset.active = String(index === rewindIndex);
 					const mark = document.createElement('span');
-					mark.className = 'mark';
+					mark.className = 'mark idx';
 					mark.textContent = item.idx;
-					const text = document.createElement('span');
-					text.className = 'text';
-					text.textContent = item.text;
-					li.append(mark, text);
+					const main = document.createElement('span');
+					main.className = 'main';
+					const title = document.createElement('span');
+					title.className = 'title clamp-2';
+					title.textContent = item.text;
+					const meta = document.createElement('span');
+					meta.className = 'meta';
+					meta.textContent =
+						'第 ' + (index + 1) + ' 条' + (item.after > 0 ? ' · 之后还有 ' + item.after + ' 条提问' : ' · 最后一条');
+					main.append(title, meta);
+					li.append(mark, main);
 					li.addEventListener('click', () => void confirmRewind(item));
 					rewindListEl.append(li);
 				});
@@ -3432,16 +3662,20 @@
 					uiListEl.replaceChildren();
 					options.forEach((option, index) => {
 						const li = document.createElement('li');
-						li.className = 'picker-item';
+						li.className =
+							'picker-item two-line' + (item.method === 'confirm' && index === 0 ? ' confirm-primary' : '');
 						li.dataset.active = String(index === 0);
 						const mark = document.createElement('span');
-						mark.className = 'mark';
+						mark.className = 'mark idx';
 						mark.textContent = String(index + 1);
-						const text = document.createElement('span');
-						text.className = 'text';
-						text.textContent = String(option);
-						text.title = String(option);
-						li.append(mark, text);
+						const main = document.createElement('span');
+						main.className = 'main';
+						const title = document.createElement('span');
+						title.className = 'title';
+						title.textContent = String(option);
+						title.title = String(option);
+						main.append(title);
+						li.append(mark, main);
 						li.addEventListener('click', () => answerUIList(index));
 						uiListEl.append(li);
 					});
@@ -3510,10 +3744,25 @@
 					uiTimeoutTimer = 0;
 				}
 				if (!Number.isFinite(item.timeout) || item.timeout <= 0) return;
-				uiDeadline = Date.now() + item.timeout;
+				const total = item.timeout;
+				uiDeadline = Date.now() + total;
+				// foot 换成“进度条 + 文字”，倒计时长短一眼可见
+				uiFootEl.replaceChildren();
+				const wrap = document.createElement('div');
+				wrap.className = 'ui-timeout';
+				const track = document.createElement('span');
+				track.className = 'ui-timeout-track';
+				const fill = document.createElement('span');
+				fill.className = 'ui-timeout-fill';
+				track.append(fill);
+				const text = document.createElement('span');
+				wrap.append(track, text);
+				uiFootEl.append(wrap);
 				const tick = () => {
-					const left = Math.max(0, Math.ceil((uiDeadline - Date.now()) / 1000));
-					uiFootEl.textContent = `还有 ${left}s 将按默认值处理（${item.method === 'confirm' ? '取消' : '不选择'}）`;
+					const leftMs = Math.max(0, uiDeadline - Date.now());
+					const left = Math.ceil(leftMs / 1000);
+					fill.style.width = Math.max(0, Math.min(100, (leftMs / total) * 100)) + '%';
+					text.textContent = `还有 ${left}s 将按默认值处理（${item.method === 'confirm' ? '取消' : '不选择'}）`;
 					if (left <= 0) {
 						clearInterval(uiTimeoutTimer);
 						uiTimeoutTimer = 0;
@@ -3616,6 +3865,59 @@
 				leaveSheet(usageOverlayEl);
 			}
 
+			/** 一个指标：淡色标签 + 实色数值（悬停有图例）。 */
+			function usageMetric(tag, value, title) {
+				const node = document.createElement('span');
+				node.className = 'metric';
+				if (title) node.title = title;
+				node.append(document.createTextNode(tag));
+				const strong = document.createElement('b');
+				strong.textContent = value;
+				node.append(strong);
+				return node;
+			}
+
+			/** 一行进度：标签 | 条 | 百分比 | 说明（重置倒计时）。percent 为空时条不填。 */
+			function usageProgressRow(label, percent, options = {}) {
+				const row = document.createElement('div');
+				row.className = 'usage-row';
+				const name = document.createElement('span');
+				name.className = 'usage-label';
+				name.textContent = label;
+				name.title = label;
+				const bar = document.createElement('span');
+				bar.className = 'usage-bar';
+				const fill = document.createElement('span');
+				fill.className = 'usage-fill' + (options.level ? ' ' + options.level : '');
+				const filled = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : 0;
+				fill.style.width = filled + '%';
+				bar.append(fill);
+				const value = document.createElement('span');
+				value.className = 'usage-value';
+				value.textContent = options.valueText || (Number.isFinite(percent) ? percent.toFixed(1) + '%' : '?');
+				const when = document.createElement('span');
+				when.className = 'usage-when';
+				when.textContent = options.when || '';
+				row.append(name, bar, value, when);
+				return row;
+			}
+
+			/** 已用百分比的档位：≥90% 危险、≥70% 警告。 */
+			function usedLevel(percent) {
+				if (!Number.isFinite(percent)) return '';
+				if (percent >= 90) return 'danger';
+				if (percent >= 70) return 'warn';
+				return '';
+			}
+
+			/** 剩余百分比的档位：≤10% 危险、≤30% 警告。 */
+			function remainLevel(percent) {
+				if (!Number.isFinite(percent)) return '';
+				if (percent <= 10) return 'danger';
+				if (percent <= 30) return 'warn';
+				return '';
+			}
+
 			/** 把本会话用量 + Codex 额度 + OpenCode Go 套餐用量画进浮层。 */
 			function renderUsageOverlay() {
 				usageBodyEl.replaceChildren();
@@ -3638,25 +3940,35 @@
 				// 本会话（pi）
 				const session = section('本会话');
 				if (usageState) {
-					line(
-						session,
-						`↑${formatTokens(usageState.input)} ↓${formatTokens(usageState.output)} ` +
-							`R${formatTokens(usageState.cacheRead)} W${formatTokens(usageState.cacheWrite)} ` +
-							`$${(Number(usageState.cost) || 0).toFixed(3)}`,
+					const metrics = document.createElement('div');
+					metrics.className = 'usage-metrics';
+					metrics.append(
+						usageMetric('↑', formatTokens(usageState.input), '输入 tokens'),
+						usageMetric('↓', formatTokens(usageState.output), '输出 tokens'),
+						usageMetric('R', formatTokens(usageState.cacheRead), '缓存读 tokens'),
+						usageMetric('W', formatTokens(usageState.cacheWrite), '缓存写 tokens'),
+						usageMetric('$', (Number(usageState.cost) || 0).toFixed(3), '本会话累计费用'),
 					);
+					session.append(metrics);
 					const context = usageState.context || null;
-					const percent = context && Number.isFinite(context.percent) ? context.percent.toFixed(1) + '%' : '?';
+					const percent = context && Number.isFinite(context.percent) ? context.percent : null;
 					const windowSize = context && Number.isFinite(context.contextWindow) ? formatTokens(context.contextWindow) : '?';
-					line(session, `上下文 ${percent}/${windowSize}`);
+					session.append(
+						usageProgressRow('上下文', percent, {
+							level: usedLevel(percent),
+							valueText: (percent === null ? '?' : percent.toFixed(1) + '%') + ' / ' + windowSize,
+						}),
+					);
 				} else {
 					line(session, '用量 —', 'usage-note');
 				}
-				const rates = [];
-				if (Number.isFinite(rateState.live)) rates.push('实 ' + rateState.live.toFixed(1) + ' t/s');
-				if (Number.isFinite(rateState.average)) rates.push('均 ' + rateState.average.toFixed(1) + ' t/s');
-				if (rates.length) line(session, rates.join(' · '));
+				const rates = document.createElement('div');
+				rates.className = 'usage-metrics';
+				if (Number.isFinite(rateState.live)) rates.append(usageMetric('实', rateState.live.toFixed(1) + ' t/s', '实时输出速率（2 秒窗口）'));
+				if (Number.isFinite(rateState.average)) rates.append(usageMetric('均', rateState.average.toFixed(1) + ' t/s', '上一次模型调用的平均速率'));
+				if (rates.children.length) session.append(rates);
 
-				// Codex 账号额度
+				// Codex 账号额度（条 = 剩余，越少越危险）
 				const codexSection = section('Codex 额度');
 				const codex = externalUsage?.codex;
 				if (!codex) line(codexSection, usageLoading ? '读取中…' : '尚未读取', 'usage-note');
@@ -3664,17 +3976,20 @@
 				else {
 					if (!(codex.windows || []).length) line(codexSection, '接口没有返回窗口数据', 'usage-note');
 					for (const window of codex.windows || []) {
-						const remain = Number.isFinite(window.remainingPercent)
-							? '剩余 ' + window.remainingPercent.toFixed(1) + '%'
-							: '剩余 ?';
-						const reset = formatResetIn(window.resetAt);
-						line(codexSection, `${window.label}：${remain}${reset ? ' · ' + reset : ''}`);
+						const remain = Number.isFinite(window.remainingPercent) ? window.remainingPercent : null;
+						codexSection.append(
+							usageProgressRow(window.label, remain, {
+								level: remainLevel(remain),
+								valueText: remain === null ? '?' : remain.toFixed(1) + '%',
+								when: formatResetIn(window.resetAt),
+							}),
+						);
 					}
 					if (codex.credits) line(codexSection, '可用额度 ' + codex.credits);
 					if (codex.limitReached) line(codexSection, '当前窗口额度已用尽', 'usage-note error');
 				}
 
-				// OpenCode Go（percent 是已用）
+				// OpenCode Go（接口给的 percent 是已用）
 				const goSection = section('OpenCode Go');
 				const opencode = externalUsage?.opencode;
 				if (!opencode) line(goSection, usageLoading ? '读取中…' : '尚未读取', 'usage-note');
@@ -3682,11 +3997,14 @@
 				else {
 					if (!(opencode.windows || []).length) line(goSection, '接口没有返回窗口数据', 'usage-note');
 					for (const window of opencode.windows || []) {
-						const used = Number.isFinite(window.usedPercent)
-							? `已用 ${window.usedPercent.toFixed(1)}%（剩余 ${(100 - window.usedPercent).toFixed(1)}%）`
-							: '已用 ?';
-						const reset = formatResetAt(window.resetsAt);
-						line(goSection, `${window.label}：${used}${reset ? ' · ' + reset : ''}`);
+						const used = Number.isFinite(window.usedPercent) ? window.usedPercent : null;
+						goSection.append(
+							usageProgressRow(window.label, used, {
+								level: usedLevel(used),
+								valueText: used === null ? '?' : used.toFixed(1) + '%',
+								when: formatResetAt(window.resetsAt),
+							}),
+						);
 					}
 					for (const window of opencode.windows || []) {
 						if (window.status && window.status !== 'ok') {
