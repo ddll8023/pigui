@@ -5,16 +5,27 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<title>pi · pigui</title>
 		<style>
-			/* 极简占位样式：只保证可用与可读，正式外观请自行替换 */
+			/* 【设计说明】方向：Instrument 仪表轨。
+			   —— 消息区用固定 56px 的左侧 gutter 承载序号与角色标签（YOU / PI / THINK / TOOL），
+			      把“谁在说、第几条、哪一段是思考或工具”这类真实结构画出来，而不是用气泡装饰；
+			   —— 正红（--accent）只出现在运行状态、发送按钮、错误与焦点环，全页只此一处用力；
+			   —— 青色（--tool）只用于思考与工具相关内容；
+			   —— 仅浅色主题、不加载任何外部字体，只用系统字体栈保证离线可用。 */
 			:root {
-				--bg: #fbfbfa;
+				--bg: #f6f7f8;
 				--panel: #ffffff;
-				--line: #e4e4e1;
-				--text: #1f2328;
-				--muted: #6b7280;
-				--accent: #2563eb;
-				--user: #eef2ff;
-				--assistant: #ffffff;
+				--line: #e3e6e8;
+				--line-strong: #d2d7db;
+				--text: #16191c;
+				--muted: #6d7479;
+				--faint: #9aa1a6;
+				--accent: #c2402a;
+				--accent-dark: #a5331f;
+				--tool: #2f7d75;
+				--think-bg: #f1f3f4;
+				--sans: "Segoe UI Variable Text", "Segoe UI", system-ui, "Microsoft YaHei UI", sans-serif;
+				--mono: "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+				--gutter: 56px;
 			}
 			* {
 				box-sizing: border-box;
@@ -29,325 +40,1471 @@
 				flex-direction: column;
 				background: var(--bg);
 				color: var(--text);
-				font: 14px/1.55 system-ui, "Segoe UI", sans-serif;
+				font: 15px/1.7 var(--sans);
+				-webkit-font-smoothing: antialiased;
 			}
+			::selection {
+				background: rgba(47, 125, 117, 0.18);
+			}
+			::-webkit-scrollbar {
+				width: 10px;
+				height: 10px;
+			}
+			::-webkit-scrollbar-track {
+				background: transparent;
+			}
+			::-webkit-scrollbar-thumb {
+				background: #d7dbde;
+				border: 3px solid transparent;
+				background-clip: content-box;
+				border-radius: 6px;
+			}
+			::-webkit-scrollbar-thumb:hover {
+				background: #bfc5c9;
+				background-clip: content-box;
+			}
+
+			/* ---------- 顶栏：品牌 / 上下文 / 运行状态 / 操作 ---------- */
 			header {
 				display: flex;
 				align-items: center;
-				gap: 12px;
-				padding: 8px 14px;
-				border-bottom: 1px solid var(--line);
+				gap: 10px;
+				flex: none;
+				height: 42px;
+				padding: 0 12px 0 14px;
 				background: var(--panel);
+				border-bottom: 1px solid var(--line);
 			}
-			header .title {
-				font-weight: 600;
-				white-space: nowrap;
+			.brand {
+				flex: none;
+				font: 600 11.5px/1 var(--mono);
+				letter-spacing: 0.16em;
+				text-transform: uppercase;
 			}
-			header .meta {
+			.meta {
+				flex: 1;
+				min-width: 0;
+				font: 12px/1.4 var(--mono);
 				color: var(--muted);
-				font-size: 12px;
+				white-space: nowrap;
+				overflow: hidden;
+				text-overflow: ellipsis;
+			}
+			.state {
+				flex: none;
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+				font: 10.5px/1 var(--mono);
+				letter-spacing: 0.08em;
+				text-transform: uppercase;
+				color: var(--faint);
+			}
+			.state .dot {
+				width: 7px;
+				height: 7px;
+				border-radius: 50%;
+				background: var(--line-strong);
+			}
+			.state[data-busy="true"] {
+				color: var(--accent);
+			}
+			.state[data-busy="true"] .dot {
+				background: var(--accent);
+				animation: breathe 1.6s ease-in-out infinite;
+			}
+			@keyframes breathe {
+				0%,
+				100% {
+					opacity: 1;
+					transform: scale(1);
+				}
+				50% {
+					opacity: 0.4;
+					transform: scale(0.82);
+				}
+			}
+			@media (prefers-reduced-motion: reduce) {
+				.state[data-busy="true"] .dot {
+					animation: none;
+				}
+			}
+
+			/* ---------- 按钮：默认无边框，发送键是唯一的实心按钮 ---------- */
+			button {
+				font: 12px/1 var(--sans);
+				color: var(--muted);
+				background: transparent;
+				border: 1px solid transparent;
+				border-radius: 4px;
+				padding: 6px 9px;
+				cursor: pointer;
+			}
+			button:hover {
+				background: var(--think-bg);
+				color: var(--text);
+			}
+			button:focus-visible {
+				outline: 2px solid var(--accent);
+				outline-offset: 1px;
+			}
+			#send {
+				background: var(--accent);
+				color: #fff;
+				font-weight: 600;
+				padding: 9px 16px;
+				border-radius: 5px;
+			}
+			#send:hover {
+				background: var(--accent-dark);
+				color: #fff;
+			}
+
+			/* ---------- 消息区：一行一条，gutter 编码结构 ---------- */
+			main {
+				flex: 1;
+				min-height: 0;
+				overflow-y: auto;
+				display: flex;
+				flex-direction: column;
+			}
+			.row {
+				display: grid;
+				grid-template-columns: var(--gutter) minmax(0, 1fr);
+				gap: 0 14px;
+				padding: 14px 18px 16px 12px;
+				border-bottom: 1px solid var(--line);
+			}
+			.gutter {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+				padding-top: 3px;
+				font: 11px/1.3 var(--mono);
+				letter-spacing: 0.08em;
+				text-align: right;
+				user-select: none;
+			}
+			.gutter .idx {
+				font-size: 10.5px;
+				color: var(--faint);
+			}
+			.gutter .who {
+				font-weight: 600;
+				color: var(--faint);
+			}
+			.row.user .who {
+				color: var(--text);
+			}
+			.row.assistant .who,
+			.row.think .who,
+			.row.tool .who {
+				color: var(--tool);
+			}
+			.row.error .who {
+				color: var(--accent);
+			}
+			.body {
+				min-width: 0;
+			}
+			.empty {
+				padding: 36px 18px;
+				color: var(--faint);
+				font-size: 13px;
+			}
+
+			/* ---------- 正文与 Markdown ---------- */
+			.body p {
+				margin: 0 0 0.7em;
+			}
+			.body > :last-child {
+				margin-bottom: 0;
+			}
+			.body strong {
+				font-weight: 650;
+			}
+			.body h1,
+			.body h2,
+			.body h3,
+			.body h4,
+			.body h5,
+			.body h6 {
+				margin: 1.05em 0 0.45em;
+				font-weight: 650;
+				line-height: 1.35;
+			}
+			.body h1 {
+				font-size: 1.28em;
+			}
+			.body h2 {
+				font-size: 1.16em;
+			}
+			.body h3 {
+				font-size: 1.06em;
+			}
+			.body h4,
+			.body h5,
+			.body h6 {
+				font-size: 1em;
+				color: var(--muted);
+			}
+			.body ul,
+			.body ol {
+				margin: 0 0 0.7em;
+				padding-left: 1.45em;
+			}
+			.body li {
+				margin: 0.15em 0;
+			}
+			.body blockquote {
+				margin: 0 0 0.7em;
+				padding: 2px 0 2px 12px;
+				border-left: 2px solid var(--line-strong);
+				color: var(--muted);
+			}
+			.body hr {
+				border: 0;
+				border-top: 1px solid var(--line);
+				margin: 1em 0;
+			}
+			.body a {
+				color: var(--tool);
+				text-underline-offset: 2px;
+			}
+			.body code {
+				font: 12.5px/1.5 var(--mono);
+				background: var(--think-bg);
+				border: 1px solid var(--line);
+				border-radius: 3px;
+				padding: 0.08em 0.34em;
+				word-break: break-word;
+			}
+			.stream-text {
+				white-space: pre-wrap;
+				word-break: break-word;
+			}
+			.misc {
+				font: 12px/1.6 var(--mono);
+				color: var(--muted);
+			}
+
+			/* ---------- 代码块 ---------- */
+			.code-block {
+				margin: 0 0 0.8em;
+			}
+			.code-head {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0 2px 5px;
+			}
+			.code-head .lang {
+				font: 10.5px/1 var(--mono);
+				letter-spacing: 0.1em;
+				text-transform: uppercase;
+				color: var(--faint);
+			}
+			.code-head .copy {
+				font: 11px/1 var(--mono);
+				color: var(--faint);
+				border-color: var(--line);
+				border-radius: 4px;
+				padding: 3px 7px;
+			}
+			.code-block pre {
+				margin: 0;
+				padding: 10px 12px;
+				background: var(--think-bg);
+				border: 1px solid var(--line);
+				border-radius: 5px;
+				overflow-x: auto;
+			}
+			.code-block pre code {
+				font: 12.5px/1.6 var(--mono);
+				background: none;
+				border: 0;
+				padding: 0;
+				white-space: pre;
+			}
+
+			/* ---------- 思考块（折叠） ---------- */
+			details.think {
+				margin: 0 0 0.7em;
+				padding-left: 10px;
+				border-left: 2px dashed rgba(47, 125, 117, 0.42);
+			}
+			details.think > summary {
+				display: flex;
+				gap: 8px;
+				align-items: baseline;
+				cursor: pointer;
+				list-style: none;
+				font: 11.5px/1.5 var(--mono);
+				color: var(--muted);
+			}
+			details.think > summary::-webkit-details-marker {
+				display: none;
+			}
+			details.think > summary::before {
+				content: "▸";
+				color: var(--tool);
+			}
+			details.think[open] > summary::before {
+				content: "▾";
+			}
+			details.think > summary .sum {
+				flex: 1;
+				min-width: 0;
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
-				flex: 1;
 			}
-			header button,
-			footer button {
-				border: 1px solid var(--line);
-				background: var(--panel);
-				color: var(--text);
-				border-radius: 6px;
-				padding: 5px 10px;
-				cursor: pointer;
+			details.think > summary .count {
+				flex: none;
+				color: var(--faint);
 			}
-			header button:hover,
-			footer button:hover {
-				border-color: var(--accent);
-				color: var(--accent);
-			}
-			main {
-				flex: 1;
-				overflow-y: auto;
-				padding: 14px;
-				display: flex;
-				flex-direction: column;
-				gap: 10px;
-			}
-			.msg {
-				max-width: 860px;
-				padding: 9px 12px;
-				border: 1px solid var(--line);
-				border-radius: 8px;
+			details.think .think-text {
+				margin-top: 6px;
+				max-height: 300px;
+				overflow: auto;
+				font: 12.5px/1.65 var(--mono);
+				color: var(--muted);
 				white-space: pre-wrap;
 				word-break: break-word;
 			}
-			.msg.user {
-				background: var(--user);
-				align-self: flex-end;
-			}
-			.msg.assistant {
-				background: var(--assistant);
-			}
-			.msg.other {
-				background: #f6f6f4;
-				color: var(--muted);
-				font-size: 12px;
-			}
-			.status {
-				color: var(--muted);
-				font-size: 12px;
-				font-style: italic;
-			}
-			.thinking {
-				color: var(--muted);
-				font-size: 12px;
-				border-left: 2px solid var(--line);
-				padding-left: 8px;
-				white-space: pre-wrap;
-			}
-			.block-text {
-				white-space: pre-wrap;
-			}
+
+			/* ---------- 工具调用与输出 ---------- */
 			.tool-call {
-				font-family: ui-monospace, "Cascadia Mono", monospace;
-				font-size: 12px;
-				background: #f6f6f4;
-				border: 1px solid var(--line);
-				border-radius: 6px;
-				padding: 6px 8px;
-				white-space: pre-wrap;
-				word-break: break-word;
-			}
-			.tool-result {
-				font-size: 12px;
-			}
-			.tool-result summary {
-				cursor: pointer;
-				color: var(--muted);
-			}
-			.tool-result pre {
-				margin: 6px 0 0;
-				padding: 8px;
-				background: #f6f6f4;
-				border: 1px solid var(--line);
-				border-radius: 6px;
-				overflow-x: auto;
-				white-space: pre-wrap;
-			}
-			footer {
 				display: flex;
 				gap: 8px;
-				padding: 10px 14px;
-				border-top: 1px solid var(--line);
+				align-items: baseline;
+				margin: 0 0 0.5em;
+				padding: 6px 9px;
 				background: var(--panel);
+				border: 1px solid var(--line);
+				border-left: 2px solid var(--tool);
+				border-radius: 4px;
+				font: 12.5px/1.6 var(--mono);
+				overflow: hidden;
+			}
+			.tool-call .name {
+				flex: none;
+				font-weight: 600;
+				color: var(--tool);
+			}
+			.tool-call .name::before {
+				content: "⚙ ";
+			}
+			.tool-call .args {
+				flex: 1;
+				min-width: 0;
+				color: var(--muted);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.chip {
+				flex: none;
+				padding: 0 6px;
+				border-radius: 3px;
+				background: var(--think-bg);
+				font: 10.5px/1.7 var(--mono);
+				letter-spacing: 0.06em;
+				color: var(--muted);
+			}
+			.chip[data-state="running"] {
+				color: var(--accent);
+			}
+			.chip[data-state="done"] {
+				color: var(--tool);
+			}
+			.chip[data-state="failed"] {
+				color: var(--accent);
+			}
+			details.tool-result {
+				margin: 0 0 0.6em;
+				font: 12.5px/1.6 var(--mono);
+			}
+			details.tool-result > summary {
+				display: flex;
+				gap: 6px;
+				cursor: pointer;
+				list-style: none;
+				font: 11.5px/1.5 var(--mono);
+				color: var(--faint);
+			}
+			details.tool-result > summary::-webkit-details-marker {
+				display: none;
+			}
+			details.tool-result > summary::before {
+				content: "▸";
+			}
+			details.tool-result[open] > summary::before {
+				content: "▾";
+			}
+			details.tool-result pre {
+				margin: 6px 0 0;
+				padding: 8px 10px;
+				max-height: 320px;
+				overflow: auto;
+				background: var(--think-bg);
+				border: 1px solid var(--line);
+				border-radius: 4px;
+				white-space: pre-wrap;
+				word-break: break-word;
+			}
+
+			/* ---------- 状态行与错误 ---------- */
+			.row.status .body {
+				font: 12px/1.6 var(--mono);
+				color: var(--muted);
+			}
+			.row.error .body {
+				font: 12.5px/1.6 var(--sans);
+				color: var(--accent);
+			}
+
+			/* ---------- 输入区 ---------- */
+			footer {
+				flex: none;
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto;
+				gap: 6px 10px;
+				align-items: end;
+				padding: 10px 14px 12px;
+				background: var(--panel);
+				border-top: 1px solid var(--line);
+				/* 命令提示条以它为定位基准 */
+				position: relative;
 			}
 			textarea {
-				flex: 1;
+				grid-row: 1;
+				grid-column: 1;
 				resize: none;
-				height: 64px;
-				padding: 8px 10px;
-				border: 1px solid var(--line);
-				border-radius: 8px;
-				font: inherit;
+				min-height: 38px;
+				max-height: 200px;
+				padding: 9px 11px;
+				border: 1px solid var(--line-strong);
+				border-radius: 5px;
+				background: var(--panel);
 				color: inherit;
-				background: var(--bg);
+				font: 15px/1.5 var(--sans);
+				overflow-y: auto;
+			}
+			textarea::placeholder {
+				color: var(--faint);
 			}
 			textarea:focus {
-				outline: 1px solid var(--accent);
+				outline: none;
+				border-color: var(--accent);
+				box-shadow: 0 0 0 2px rgba(194, 64, 42, 0.12);
+			}
+			#send {
+				grid-row: 1;
+				grid-column: 2;
+			}
+			.hint {
+				grid-row: 2;
+				grid-column: 1 / -1;
+				font: 11px/1.4 var(--mono);
+				color: var(--faint);
+			}
+
+			/* ---------- 命令提示条（输入 / 时出现） ---------- */
+			.cmdbar {
+				position: absolute;
+				left: 14px;
+				right: 14px;
+				bottom: calc(100% - 6px);
+				z-index: 9;
+				background: var(--panel);
+				border: 1px solid var(--line-strong);
+				border-radius: 6px;
+				box-shadow: 0 12px 28px rgba(22, 25, 28, 0.16);
+				overflow: hidden;
+			}
+			.cmdbar[hidden] {
+				display: none;
+			}
+			.cmd-list {
+				list-style: none;
+				margin: 0;
+				padding: 4px 0;
+			}
+			.cmd-item {
+				display: grid;
+				grid-template-columns: auto minmax(0, 1fr);
+				gap: 0 10px;
+				align-items: baseline;
+				padding: 7px 12px;
+				cursor: pointer;
+			}
+			.cmd-item:hover {
+				background: var(--think-bg);
+			}
+			.cmd-item[data-active="true"] {
+				background: var(--think-bg);
+				box-shadow: inset 2px 0 0 var(--accent);
+			}
+			.cmd-item .name {
+				font: 12.5px/1.6 var(--mono);
+				color: var(--text);
+			}
+			.cmd-item .desc {
+				font: 11.5px/1.6 var(--mono);
+				color: var(--faint);
+			}
+
+			/* ---------- 会话选择器（/resume） ---------- */
+			.overlay {
+				position: fixed;
+				inset: 0;
+				z-index: 10;
+				display: flex;
+				align-items: flex-start;
+				justify-content: center;
+				padding: 56px 16px 16px;
+				background: rgba(22, 25, 28, 0.26);
+			}
+			.overlay[hidden] {
+				display: none;
+			}
+			.picker {
+				display: flex;
+				flex-direction: column;
+				width: min(560px, 100%);
+				max-height: 68vh;
+				background: var(--panel);
+				border: 1px solid var(--line-strong);
+				border-radius: 6px;
+				box-shadow: 0 18px 40px rgba(22, 25, 28, 0.2);
+				overflow: hidden;
+			}
+			.picker-head {
+				display: flex;
+				align-items: baseline;
+				justify-content: space-between;
+				gap: 10px;
+				padding: 10px 12px;
+				border-bottom: 1px solid var(--line);
+			}
+			.picker-title {
+				font: 600 11.5px/1 var(--mono);
+				letter-spacing: 0.12em;
+				text-transform: uppercase;
+			}
+			.picker-key {
+				font: 11px/1.4 var(--mono);
+				color: var(--faint);
+			}
+			.picker-list {
+				list-style: none;
+				margin: 0;
+				padding: 4px 0;
+				overflow-y: auto;
+			}
+			.picker-item {
+				display: grid;
+				grid-template-columns: 14px minmax(0, 1fr) auto;
+				gap: 0 10px;
+				align-items: baseline;
+				padding: 8px 12px;
+				cursor: pointer;
+			}
+			.picker-item:hover {
+				background: var(--think-bg);
+			}
+			.picker-item[data-active="true"] {
+				background: var(--think-bg);
+				box-shadow: inset 2px 0 0 var(--accent);
+			}
+			.picker-item .mark {
+				color: var(--accent);
+				font: 10px/1.7 var(--mono);
+			}
+			.picker-item .text {
+				min-width: 0;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.picker-item .time {
+				font: 11px/1.6 var(--mono);
+				color: var(--faint);
+				white-space: nowrap;
+			}
+			.picker-item.plain {
+				grid-template-columns: minmax(0, 1fr);
+				color: var(--faint);
+				font-size: 13px;
+				cursor: default;
+			}
+			.picker-item.plain:hover {
+				background: none;
+			}
+			.picker-foot {
+				padding: 8px 12px;
+				border-top: 1px solid var(--line);
+				font: 11px/1.4 var(--mono);
+				color: var(--faint);
+			}
+
+			/* ---------- 窄侧栏：gutter 折到正文上方 ---------- */
+			@media (max-width: 560px) {
+				.row {
+					grid-template-columns: minmax(0, 1fr);
+					gap: 6px;
+					padding: 12px 14px 14px;
+				}
+				.gutter {
+					flex-direction: row;
+					align-items: baseline;
+					gap: 8px;
+					padding-top: 0;
+					text-align: left;
+				}
 			}
 		</style>
 	</head>
 	<body>
 		<header>
-			<span class="title">pigui</span>
+			<span class="brand">pigui</span>
 			<span class="meta" id="meta">正在连接…</span>
+			<span class="state" id="state" data-busy="false">
+				<span class="dot"></span>
+				<span class="label">空闲</span>
+			</span>
 			<button id="abort" title="中止当前回合">中止</button>
 			<button id="new" title="开始一个新会话">新建会话</button>
 		</header>
+
 		<main id="messages"></main>
+
 		<footer>
-			<textarea id="input" placeholder="输入消息 — Enter 发送，Shift+Enter 换行"></textarea>
+			<div class="cmdbar" id="cmdbar" hidden>
+				<ul class="cmd-list" id="cmdList"></ul>
+			</div>
+			<textarea id="input" rows="1" placeholder="输入消息…（打一个 / 查看命令）"></textarea>
 			<button id="send">发送</button>
+			<div class="hint">Enter 发送 · Shift+Enter 换行 · /resume 切换会话 · /new 新建会话</div>
 		</footer>
 
+		<div class="overlay" id="overlay" hidden>
+			<div class="picker" role="dialog" aria-label="切换会话">
+				<div class="picker-head">
+					<span class="picker-title">切换会话</span>
+					<span class="picker-key">↑↓ 选择 · Enter 切换 · Esc 关闭</span>
+				</div>
+				<ul class="picker-list" id="pickerList"></ul>
+				<div class="picker-foot">切到其他会话前，确认它没有在 Orca / pi 里同时打开</div>
+			</div>
+		</div>
+
 		<script>
+			/* pigui 前端脚本：只负责渲染服务端推来的帧，不含任何业务判断。
+			   服务端接口：GET /api/context · POST /api/prompt · POST /api/abort · POST /api/new · SSE /api/events
+			   帧类型：history / session / delta / thinking / message / event / error */
+
 			const messagesEl = document.getElementById('messages');
 			const metaEl = document.getElementById('meta');
+			const stateEl = document.getElementById('state');
 			const inputEl = document.getElementById('input');
 			const sendEl = document.getElementById('send');
+			const overlayEl = document.getElementById('overlay');
+			const pickerListEl = document.getElementById('pickerList');
+			const cmdbarEl = document.getElementById('cmdbar');
+			const cmdListEl = document.getElementById('cmdList');
 
-			/** 页面上正在流式输出的气泡，null 表示当前没有输出。 */
-			let streamingEl = null;
-			/** 页面上正在流式输出的思考气泡。 */
-			let thinkingEl = null;
+			/** 消息序号（只给真正的消息行，状态行不占号）。 */
+			let seq = 0;
+			/** 当前流式正文行：{ row, body, text }。 */
+			let streaming = null;
+			/** 当前流式思考行：{ row, details, textEl, countEl, text }。 */
+			let thinkingRow = null;
+			/** 本回合的临时行（正文/思考/工具），助手消息落定后整体重绘替换。 */
+			let tmpRows = [];
+			/** toolCallId → 工具行元素（用于把执行结果回写到对应行）。 */
+			const toolRows = new Map();
+			/** 本地已画出的用户消息文本，用于跳过服务端回显造成的重复。 */
+			let lastLocalUserText = null;
+			/** 当前会话文件路径（用于在选择器里标记当前项）。 */
+			let currentSessionPath = '';
+			/** 会话选择器（/resume）状态。 */
+			let pickerOpen = false;
+			let pickerItems = [];
+			let pickerIndex = 0;
+			/** 页面内命令表（输入 / 时提示）。 */
+			const COMMANDS = [
+				{ name: '/resume', desc: '切换会话' },
+				{ name: '/new', desc: '新建会话' },
+			];
+			/** 命令提示条状态。 */
+			let commandOpen = false;
+			let commandMatches = [];
+			let commandIndex = 0;
 
-			/** 是否已经贴到底部（用于决定要不要自动滚动）。 */
+			/** 是否已经贴到底部（决定要不要自动滚动）。 */
 			function pinnedToBottom() {
 				return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 60;
 			}
 
-			/** 追加一个元素，并在需要时滚到底。 */
-			function append(node) {
+			/** 追加一行；贴着底部时自动跟随，并移除空态提示。 */
+			function appendRow(row) {
+				const empty = messagesEl.querySelector('.empty');
+				if (empty) empty.remove();
 				const pinned = pinnedToBottom();
-				messagesEl.appendChild(node);
+				messagesEl.append(row);
 				if (pinned) messagesEl.scrollTop = messagesEl.scrollHeight;
 			}
 
-			/** 清空所有气泡（新建会话时用）。 */
+			/** 生成一行骨架：左侧 gutter（序号 + 角色标签）+ 右侧 body。 */
+			function createRow(kind, label, options) {
+				const opts = options || {};
+				const row = document.createElement('article');
+				row.className = 'row ' + kind;
+				const gutter = document.createElement('div');
+				gutter.className = 'gutter';
+				if (opts.index != null) {
+					const idx = document.createElement('span');
+					idx.className = 'idx';
+					idx.textContent = String(opts.index).padStart(3, '0');
+					gutter.append(idx);
+				}
+				const who = document.createElement('span');
+				who.className = 'who';
+				who.textContent = label;
+				gutter.append(who);
+				const body = document.createElement('div');
+				body.className = 'body';
+				row.append(gutter, body);
+				return { row, body };
+			}
+
+			/** 生成一条正式消息行（占用序号）。 */
+			function createMessageRow(kind, label) {
+				seq += 1;
+				const { row, body } = createRow(kind, label, { index: seq });
+				appendRow(row);
+				return { row, body };
+			}
+
+			/** 清空全部消息并复位计数（新建会话时用）。 */
 			function clearMessages() {
 				messagesEl.replaceChildren();
-				streamingEl = null;
-				thinkingEl = null;
+				seq = 0;
+				streaming = null;
+				thinkingRow = null;
+				tmpRows = [];
+				toolRows.clear();
+				lastLocalUserText = null;
+				showEmptyHint();
 			}
 
-			/** 添加一条消息气泡。 */
-			function addMessage(role, text) {
-				const cls = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'other';
+			/** 空会话时给一句引导，避免出现纯白页面。 */
+			function showEmptyHint() {
+				if (messagesEl.querySelector('.row')) return;
 				const node = document.createElement('div');
-				node.className = 'msg ' + cls;
-				node.textContent = text;
-				append(node);
-				return node;
+				node.className = 'empty';
+				node.textContent = '在下面输入第一条消息，pi 会在当前工作目录开始工作。';
+				messagesEl.append(node);
 			}
 
-			/** 渲染一个内容块（服务端已按类型拆好）。 */
-			function addBlock(container, block) {
+			/** 构造代码块（含语言标签与复制按钮）。 */
+			function buildCodeBlock(lang, code) {
+				const wrap = document.createElement('div');
+				wrap.className = 'code-block';
+				const head = document.createElement('div');
+				head.className = 'code-head';
+				const tag = document.createElement('span');
+				tag.className = 'lang';
+				tag.textContent = lang || 'text';
+				const copy = document.createElement('button');
+				copy.type = 'button';
+				copy.className = 'copy';
+				copy.textContent = '复制';
+				copy.addEventListener('click', () => {
+					const done = () => {
+						copy.textContent = '已复制';
+						setTimeout(() => {
+							copy.textContent = '复制';
+						}, 1200);
+					};
+					if (navigator.clipboard) navigator.clipboard.writeText(code).then(done, () => {});
+				});
+				head.append(tag, copy);
+				const pre = document.createElement('pre');
+				const codeEl = document.createElement('code');
+				codeEl.textContent = code;
+				pre.append(codeEl);
+				wrap.append(head, pre);
+				return wrap;
+			}
+
+			/** 行内 Markdown：**粗体**、*斜体*、`代码`、[文本](http/https/#/ 链接)。 */
+			function renderInline(text, parent) {
+				const pattern = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`|\[[^\]\n]+\]\((?:https?:\/\/|#|\/)[^)\s]+\))/g;
+				let last = 0;
+				for (const match of text.matchAll(pattern)) {
+					if (match.index > last) parent.append(document.createTextNode(text.slice(last, match.index)));
+					const token = match[0];
+					if (token.startsWith('**')) {
+						const node = document.createElement('strong');
+						renderInline(token.slice(2, -2), node);
+						parent.append(node);
+					} else if (token.startsWith('`')) {
+						const node = document.createElement('code');
+						node.textContent = token.slice(1, -1);
+						parent.append(node);
+					} else if (token.startsWith('[')) {
+						const parts = /^\[([^\]]+)\]\(([^)]+)\)$/.exec(token);
+						const link = document.createElement('a');
+						link.textContent = parts[1];
+						link.href = parts[2];
+						link.target = '_blank';
+						link.rel = 'noreferrer noopener';
+						parent.append(link);
+					} else {
+						const node = document.createElement('em');
+						renderInline(token.slice(1, -1), node);
+						parent.append(node);
+					}
+					last = match.index + token.length;
+				}
+				if (last < text.length) parent.append(document.createTextNode(text.slice(last)));
+			}
+
+			/** 极简 Markdown 块级渲染：围栏代码块、标题、列表、引用、分隔线、段落。
+			    全部用 DOM API 构建，不经过 innerHTML，因此模型输出里的 HTML 不会被解析。 */
+			function renderMarkdown(text, container) {
+				try {
+					renderMarkdownBlocks(String(text == null ? '' : text), container);
+				} catch {
+					const fallback = document.createElement('div');
+					fallback.className = 'stream-text';
+					fallback.textContent = String(text == null ? '' : text);
+					container.append(fallback);
+				}
+			}
+
+			/** renderMarkdown 的实际实现（异常由调用方兜底）。 */
+			function renderMarkdownBlocks(text, container) {
+				const lines = text.split('\n');
+				let paragraph = [];
+				let i = 0;
+
+				const flushParagraph = () => {
+					if (!paragraph.length) return;
+					const node = document.createElement('p');
+					renderInline(paragraph.join('\n'), node);
+					container.append(node);
+					paragraph = [];
+				};
+
+				while (i < lines.length) {
+					const line = lines[i];
+
+					if (/^\s*```/.test(line)) {
+						flushParagraph();
+						const lang = line.replace(/^\s*```/, '').trim();
+						const code = [];
+						i += 1;
+						while (i < lines.length && !/^\s*```/.test(lines[i])) {
+							code.push(lines[i]);
+							i += 1;
+						}
+						i += 1;
+						container.append(buildCodeBlock(lang, code.join('\n')));
+						continue;
+					}
+
+					const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+					if (heading) {
+						flushParagraph();
+						const node = document.createElement('h' + heading[1].length);
+						renderInline(heading[2], node);
+						container.append(node);
+						i += 1;
+						continue;
+					}
+
+					if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+						flushParagraph();
+						container.append(document.createElement('hr'));
+						i += 1;
+						continue;
+					}
+
+					if (/^>\s?/.test(line)) {
+						flushParagraph();
+						const quoted = [];
+						while (i < lines.length && /^>\s?/.test(lines[i])) {
+							quoted.push(lines[i].replace(/^>\s?/, ''));
+							i += 1;
+						}
+						const node = document.createElement('blockquote');
+						renderInline(quoted.join('\n'), node);
+						container.append(node);
+						continue;
+					}
+
+					const ordered = /^\s*\d+[.)]\s+/.test(line);
+					if (ordered || /^\s*[-*+]\s+/.test(line)) {
+						flushParagraph();
+						const itemRe = ordered ? /^\s*\d+[.)]\s+(.*)$/ : /^\s*[-*+]\s+(.*)$/;
+						const list = document.createElement(ordered ? 'ol' : 'ul');
+						while (i < lines.length) {
+							const item = itemRe.exec(lines[i]);
+							if (!item) break;
+							let content = item[1];
+							i += 1;
+							while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !itemRe.exec(lines[i])) {
+								content += '\n' + lines[i].trim();
+								i += 1;
+							}
+							const li = document.createElement('li');
+							renderInline(content, li);
+							list.append(li);
+						}
+						container.append(list);
+						continue;
+					}
+
+					if (/^\s*$/.test(line)) {
+						flushParagraph();
+						i += 1;
+						continue;
+					}
+
+					paragraph.push(line);
+					i += 1;
+				}
+				flushParagraph();
+			}
+
+			/** 取第一行，用作折叠块的摘要。 */
+			function firstLine(text) {
+				const flat = String(text || '').replace(/\s+/g, ' ').trim();
+				return flat.slice(0, 90) || '（空）';
+			}
+
+			/** 思考块：默认折叠，摘要显示首行与字数。 */
+			function buildThinkBlock(text, open) {
+				const details = document.createElement('details');
+				details.className = 'think';
+				if (open) details.open = true;
+				const summary = document.createElement('summary');
+				const sum = document.createElement('span');
+				sum.className = 'sum';
+				sum.textContent = firstLine(text);
+				const count = document.createElement('span');
+				count.className = 'count';
+				count.textContent = String(text || '').length + ' 字';
+				summary.append(sum, count);
+				const body = document.createElement('div');
+				body.className = 'think-text';
+				body.textContent = text || '';
+				details.append(summary, body);
+				return details;
+			}
+
+			/** 工具调用行：⚙ 名称 + 参数摘要 + 状态标签。 */
+			function buildToolLine(name, args, state) {
+				const line = document.createElement('div');
+				line.className = 'tool-call';
+				const nameEl = document.createElement('span');
+				nameEl.className = 'name';
+				nameEl.textContent = name || 'tool';
+				line.append(nameEl);
+				const flat = String(args || '').replace(/\s+/g, ' ').trim();
+				if (flat) {
+					const argsEl = document.createElement('span');
+					argsEl.className = 'args';
+					argsEl.textContent = flat;
+					argsEl.title = String(args || '');
+					line.append(argsEl);
+				}
+				const chip = document.createElement('span');
+				chip.className = 'chip';
+				chip.dataset.state = state || 'running';
+				chip.textContent = state === 'running' ? '运行中' : state === 'failed' ? '失败' : '完成';
+				line.append(chip);
+				return { line, chip };
+			}
+
+			/** 工具输出：折叠块，摘要显示行数与字节数。 */
+			function buildToolResult(text) {
+				const details = document.createElement('details');
+				details.className = 'tool-result';
+				const summary = document.createElement('summary');
+				const body = String(text || '');
+				summary.textContent = '输出 · ' + body.split('\n').length + ' 行 · ' + body.length + ' 字节';
+				summary.title = firstLine(body);
+				const pre = document.createElement('pre');
+				pre.textContent = body;
+				details.append(summary, pre);
+				return details;
+			}
+
+			/** 按类型渲染一个内容块（服务端已拆好类型）。 */
+			function addBlock(body, block) {
 				const type = block.type || 'other';
 				if (type === 'thinking') {
-					const node = document.createElement('div');
-					node.className = 'thinking';
-					node.textContent = block.text || '';
-					container.appendChild(node);
-					return;
-				}
-				if (type === 'toolCall') {
-					const node = document.createElement('div');
-					node.className = 'tool-call';
-					const body = block.arguments || block.text || '';
-					node.textContent = '⚙ ' + (block.name || 'tool') + (body ? '\n' + body : '');
-					container.appendChild(node);
-					return;
-				}
-				if (type === 'toolResult') {
-					const details = document.createElement('details');
-					details.className = 'tool-result';
-					const summary = document.createElement('summary');
-					summary.textContent = '工具输出';
-					const pre = document.createElement('pre');
-					pre.textContent = block.text || '';
-					details.append(summary, pre);
-					container.appendChild(details);
+					body.append(buildThinkBlock(block.text || '', false));
 					return;
 				}
 				if (type === 'text') {
 					const node = document.createElement('div');
-					node.className = 'block-text';
-					node.textContent = block.text || '';
-					container.appendChild(node);
+					renderMarkdown(block.text || '', node);
+					body.append(node);
+					return;
+				}
+				if (type === 'toolCall') {
+					const built = buildToolLine(block.name, block.arguments || block.text || '', 'done');
+					body.append(built.line);
+					return;
+				}
+				if (type === 'toolResult') {
+					body.append(buildToolResult(block.text || ''));
 					return;
 				}
 				if (block.text) {
 					const node = document.createElement('div');
-					node.className = 'status';
+					node.className = 'misc';
 					node.textContent = '[' + type + '] ' + block.text;
-					container.appendChild(node);
+					body.append(node);
 				}
 			}
 
-			/** 按块渲染一条消息气泡（existing 传入时复用已有气泡，用于流式结束后重绘）。 */
-			function addMessageBlocks(role, blocks, existing) {
-				const cls = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'other';
-				const node = existing || document.createElement('div');
-				if (existing) node.replaceChildren();
-				else {
-					node.className = 'msg ' + cls;
-					append(node);
+			/** 画一条完整消息（历史重放与回合落定都用它）。 */
+			function renderMessage(message) {
+				const role = message.role || 'unknown';
+				if (role === 'system') return null; // 系统提示词不进对话流
+				if (role === 'toolResult') {
+					// 工具输出在 pi 里是独立消息，渲染成可折叠的输出块。
+					const { row, body } = createRow('tool', 'TOOL');
+					appendRow(row);
+					body.append(buildToolResult(message.text || ''));
+					return row;
 				}
-				for (const block of blocks || []) addBlock(node, block);
-				return node;
+				const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+				const kind = role === 'user' ? 'user' : role === 'assistant' ? 'assistant' : 'status';
+				const label = role === 'user' ? 'YOU' : role === 'assistant' ? 'PI' : String(role).toUpperCase();
+				if (kind === 'status') {
+					const { row, body } = createRow('status', label);
+					appendRow(row);
+					addBlock(body, { type: 'text', text: message.text || '' });
+					return null;
+				}
+				const { row, body } = createMessageRow(kind, label);
+				if (blocks.length) for (const block of blocks) addBlock(body, block);
+				else if (message.text) addBlock(body, { type: 'text', text: message.text });
+				return row;
 			}
 
-			/** 添加一条状态行（工具事件、错误等）。 */
-			function addStatus(text) {
+			/** 本地立即画出用户消息（服务端稍后会回显同一条，需要去重）。 */
+			function addUserMessage(text) {
+				const { body } = createMessageRow('user', 'YOU');
 				const node = document.createElement('div');
-				node.className = 'status';
-				node.textContent = text;
-				append(node);
+				renderMarkdown(text, node);
+				body.append(node);
+				lastLocalUserText = text;
 			}
 
-			/** 更新头部信息。 */
+			/** 确保存在流式正文行；没有就新建一行。 */
+			function ensureStreaming() {
+				if (streaming) return streaming;
+				const { row, body } = createMessageRow('assistant', 'PI');
+				const textEl = document.createElement('div');
+				textEl.className = 'stream-text';
+				body.append(textEl);
+				streaming = { row, body, textEl, text: '' };
+				tmpRows.push(row);
+				return streaming;
+			}
+
+			/** 思考增量：单独一行，左侧青虚线，流式期间展开。 */
+			function appendThinking(chunk) {
+				if (!thinkingRow) {
+					const { row, body } = createRow('think', 'THINK');
+					appendRow(row);
+					const details = buildThinkBlock('', true);
+					body.append(details);
+					thinkingRow = {
+						row,
+						details,
+						textEl: details.querySelector('.think-text'),
+						countEl: details.querySelector('.count'),
+						text: '',
+					};
+					tmpRows.push(row);
+					streaming = null; // 思考之后的正文另起一行，保证时间顺序
+				}
+				thinkingRow.text += chunk;
+				thinkingRow.textEl.textContent = thinkingRow.text;
+				thinkingRow.countEl.textContent = thinkingRow.text.length + ' 字';
+				if (pinnedToBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
+			}
+
+			/** 工具开始执行：立刻起一行，让用户看到当前在跑什么。 */
+			function startToolRow(detail) {
+				const { row, body } = createRow('tool', 'TOOL');
+				appendRow(row);
+				const built = buildToolLine(detail.toolName || detail.name || 'tool', '', 'running');
+				body.append(built.line);
+				row._chip = built.chip;
+				tmpRows.push(row);
+				if (detail.toolCallId) toolRows.set(detail.toolCallId, row);
+				streaming = null; // 工具之后的正文另起一行
+			}
+
+			/** 工具执行结束：把状态回写到对应行。 */
+			function endToolRow(detail) {
+				const row = detail.toolCallId ? toolRows.get(detail.toolCallId) : null;
+				if (!row || !row._chip) return;
+				const failed = /error|fail|cancel|abort/i.test(String(detail.status || '') + ' ' + String(detail.reason || ''));
+				row._chip.dataset.state = failed ? 'failed' : 'done';
+				row._chip.textContent = failed ? '失败' : '完成';
+				if (detail.toolCallId) toolRows.delete(detail.toolCallId);
+			}
+
+			/** 助手消息落定：丢弃本回合的临时行，用服务端给出的完整 blocks 重画一次。
+			 *  若当前有流式行，就复用它（连同已占用的序号），否则序号会跳号。 */
+			function settleAssistantMessage(message) {
+				const blocks = Array.isArray(message.blocks) ? message.blocks : [];
+				let target = streaming && streaming.row ? streaming.row : null;
+				let body = null;
+				if (target) {
+					body = target.querySelector('.body');
+					body.replaceChildren();
+				} else {
+					const created = createMessageRow('assistant', 'PI');
+					target = created.row;
+					body = created.body;
+				}
+				for (const row of tmpRows) if (row !== target) row.remove();
+				tmpRows = [];
+				streaming = null;
+				thinkingRow = null;
+				toolRows.clear();
+				if (blocks.length) for (const block of blocks) addBlock(body, block);
+				else if (message.text) addBlock(body, { type: 'text', text: message.text });
+				if (pinnedToBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
+				return target;
+			}
+
+			/** 追加一条状态行（事件、错误）。 */
+			function addStatusRow(text, kind) {
+				const { row, body } = createRow(kind === 'error' ? 'error' : 'status', kind === 'error' ? 'ERR' : 'EV');
+				body.textContent = text;
+				appendRow(row);
+			}
+
+			/** 归一化路径，用于判断两个会话是否同一个文件。 */
+			function samePath(a, b) {
+				return (
+					String(a || '').replace(/\\/g, '/').toLowerCase() ===
+					String(b || '').replace(/\\/g, '/').toLowerCase()
+				);
+			}
+
+			/** 会话时间的短格式：今天只显示时分，其它显示月-日 时分。 */
+			function shortTime(value) {
+				const date = new Date(value);
+				if (Number.isNaN(date.getTime())) return '';
+				const pad = (n) => String(n).padStart(2, '0');
+				const clock = pad(date.getHours()) + ':' + pad(date.getMinutes());
+				const sameDay = date.toDateString() === new Date().toDateString();
+				return sameDay ? clock : pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + clock;
+			}
+
+			/** 渲染会话列表（含高亮与滚动定位）。传 message 则只显示一行说明。 */
+			function renderPicker(message) {
+				pickerListEl.replaceChildren();
+				const plain = (text) => {
+					const item = document.createElement('li');
+					item.className = 'picker-item plain';
+					item.textContent = text;
+					pickerListEl.append(item);
+				};
+				if (message) return plain(message);
+				if (!pickerItems.length) return plain('这个目录还没有历史会话');
+				pickerItems.forEach((info, index) => {
+					const item = document.createElement('li');
+					item.className = 'picker-item';
+					item.dataset.active = String(index === pickerIndex);
+					const mark = document.createElement('span');
+					mark.className = 'mark';
+					mark.textContent = samePath(info.path, currentSessionPath) ? '●' : '';
+					const text = document.createElement('span');
+					text.className = 'text';
+					text.textContent = String(info.name || info.firstMessage || info.id || '(空会话)').slice(0, 120);
+					const time = document.createElement('span');
+					time.className = 'time';
+					time.textContent = shortTime(info.modified) + ' · ' + (info.messageCount || 0) + ' 条';
+					item.append(mark, text, time);
+					item.addEventListener('click', () => void switchSession(info.path));
+					pickerListEl.append(item);
+				});
+				const active = pickerListEl.children[pickerIndex];
+				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+			}
+
+			/** 打开会话选择器（输入 /resume 触发）。 */
+			async function openSessionPicker() {
+				pickerOpen = true;
+				overlayEl.hidden = false;
+				pickerItems = [];
+				pickerIndex = 0;
+				renderPicker('正在读取会话列表…');
+				let sessions = [];
+				try {
+					const response = await fetch('/api/sessions');
+					const data = await response.json();
+					sessions = Array.isArray(data.sessions) ? data.sessions : [];
+				} catch {
+					renderPicker('读取会话列表失败');
+					return;
+				}
+				sessions.sort((a, b) => new Date(b.modified || 0) - new Date(a.modified || 0));
+				pickerItems = sessions;
+				const at = sessions.findIndex((info) => samePath(info.path, currentSessionPath));
+				pickerIndex = at >= 0 ? at : 0;
+				renderPicker();
+			}
+
+			/** 关闭会话选择器。 */
+			function closeSessionPicker() {
+				pickerOpen = false;
+				overlayEl.hidden = true;
+			}
+
+			/** 上下键移动高亮。 */
+			function movePicker(delta) {
+				if (!pickerItems.length) return;
+				pickerIndex = (pickerIndex + delta + pickerItems.length) % pickerItems.length;
+				renderPicker();
+			}
+
+			/** 切换到指定会话（服务端会广播历史，页面自动重放）。 */
+			async function switchSession(sessionFile) {
+				if (!sessionFile) return;
+				if (samePath(sessionFile, currentSessionPath)) {
+					closeSessionPicker();
+					return;
+				}
+				const response = await fetch('/api/switch', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ sessionFile }),
+				}).catch(() => null);
+				if (!response || !response.ok) {
+					addStatusRow('切换会话失败', 'error');
+					return;
+				}
+				closeSessionPicker();
+			}
+
+			/** 当前输入是否处于命令输入状态（以 / 开头且还没打空格），否则返回 null。 */
+			function commandQuery() {
+				const text = inputEl.value;
+				if (!text.startsWith('/') || /\s/.test(text)) return null;
+				return text.toLowerCase();
+			}
+
+			/** 按当前输入刷新命令提示条。 */
+			function refreshCommands() {
+				if (pickerOpen) {
+					hideCommands();
+					return;
+				}
+				const query = commandQuery();
+				if (query === null) {
+					hideCommands();
+					return;
+				}
+				const matches = COMMANDS.filter((command) => command.name.startsWith(query));
+				if (!matches.length) {
+					hideCommands();
+					return;
+				}
+				commandMatches = matches;
+				if (commandIndex >= matches.length) commandIndex = 0;
+				commandOpen = true;
+				cmdbarEl.hidden = false;
+				renderCommands();
+			}
+
+			/** 渲染命令提示条。 */
+			function renderCommands() {
+				cmdListEl.replaceChildren();
+				commandMatches.forEach((command, index) => {
+					const item = document.createElement('li');
+					item.className = 'cmd-item';
+					item.dataset.active = String(index === commandIndex);
+					const name = document.createElement('span');
+					name.className = 'name';
+					name.textContent = command.name;
+					const desc = document.createElement('span');
+					desc.className = 'desc';
+					desc.textContent = command.desc;
+					item.append(name, desc);
+					// 用 mousedown 抢在输入框失焦之前执行，避免点击被 blur 吃掉
+					item.addEventListener('mousedown', (event) => {
+						event.preventDefault();
+						void runCommand(command.name);
+					});
+					cmdListEl.append(item);
+				});
+			}
+
+			/** 收起命令提示条。 */
+			function hideCommands() {
+				commandOpen = false;
+				commandMatches = [];
+				cmdbarEl.hidden = true;
+			}
+
+			/** 上下键移动命令高亮。 */
+			function moveCommand(delta) {
+				if (!commandMatches.length) return;
+				commandIndex = (commandIndex + delta + commandMatches.length) % commandMatches.length;
+				renderCommands();
+			}
+
+			/** 执行页面内命令；返回 false 表示不是已知命令（应当作普通消息发送）。 */
+			async function runCommand(name) {
+				if (name !== '/resume' && name !== '/new') return false;
+				hideCommands();
+				inputEl.value = '';
+				autoGrow();
+				if (name === '/resume') await openSessionPicker();
+				else await newSession();
+				return true;
+			}
+
+			/** 新建会话（顶栏按钮、/new 命令与命令提示条共用）。 */
+			async function newSession() {
+				await fetch('/api/new', { method: 'POST' }).catch(() => {});
+				clearMessages();
+				addStatusRow('已开始新会话');
+			}
+
+			/** 更新顶栏运行状态。 */
+			function setBusy(next) {
+				const busy = Boolean(next);
+				stateEl.dataset.busy = busy ? 'true' : 'false';
+				stateEl.querySelector('.label').textContent = busy ? '运行中' : '空闲';
+			}
+
+			/** 更新顶栏上下文信息。 */
 			function renderContext(context) {
 				if (!context) return;
-				const parts = [context.cwd];
+				const parts = [];
+				if (context.cwd) parts.push(context.cwd);
 				if (context.model) parts.push(context.model);
 				if (context.sessionFile) parts.push(context.sessionFile.split(/[\\/]/).pop());
-				parts.push(context.busy ? '运行中' : '空闲');
-				metaEl.textContent = parts.join(' · ');
-				metaEl.title = context.sessionFile || context.cwd;
+				metaEl.textContent = parts.join(' · ') || '已连接';
+				metaEl.title = [context.cwd, context.model, context.sessionFile].filter(Boolean).join('\n');
+				currentSessionPath = context.sessionFile || '';
+				setBusy(context.busy);
 			}
 
-			/** 处理服务端推来的事件帧。 */
+			/** 处理服务端推来的每一帧。 */
 			function handleFrame(frame) {
 				if (frame.kind === 'history') {
-					clearMessages();
-					for (const message of frame.messages || []) {
-						if (Array.isArray(message.blocks) && message.blocks.length > 0) addMessageBlocks(message.role, message.blocks);
-						else if (message.text) addMessage(message.role, message.text);
-					}
+					messagesEl.replaceChildren();
+					seq = 0;
+					streaming = null;
+					thinkingRow = null;
+					tmpRows = [];
+					toolRows.clear();
+					lastLocalUserText = null;
+					const messages = frame.messages || [];
+					for (const message of messages) renderMessage(message);
+					if (!messages.length) showEmptyHint();
 					return;
 				}
+
 				if (frame.kind === 'session') {
 					renderContext(frame.info);
-					if (frame.info && frame.info.modelFallbackMessage) addStatus('提示：' + frame.info.modelFallbackMessage);
+					if (frame.info && frame.info.modelFallbackMessage) addStatusRow('提示：' + frame.info.modelFallbackMessage);
 					return;
 				}
+
 				if (frame.kind === 'delta') {
-					thinkingEl = null;
-					if (!streamingEl) streamingEl = addMessage('assistant', '');
-					streamingEl.textContent += frame.text;
+					const target = ensureStreaming();
+					target.text += frame.text;
+					target.textEl.textContent = target.text;
 					if (pinnedToBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
 					return;
 				}
+
 				if (frame.kind === 'thinking') {
-					if (!thinkingEl) {
-						thinkingEl = document.createElement('div');
-						thinkingEl.className = 'thinking';
-						append(thinkingEl);
-					}
-					thinkingEl.textContent += frame.text;
+					appendThinking(frame.text);
 					return;
 				}
+
 				if (frame.kind === 'message') {
 					const message = frame.message || {};
-					const blocks = Array.isArray(message.blocks) ? message.blocks : [];
 					const role = message.role || 'unknown';
-					const target = role === 'assistant' ? streamingEl : null;
-					if (blocks.length > 0) {
-						addMessageBlocks(role, blocks, target);
-						if (target) streamingEl = null;
-					} else if (message.text) {
-						if (target) {
-							target.textContent = message.text;
-							streamingEl = null;
-						} else {
-							addMessage(role, message.text);
-						}
+					thinkingRow = null;
+					if (role === 'assistant') {
+						settleAssistantMessage(message);
+						return;
 					}
-					thinkingEl = null;
+					if (role === 'user') {
+						const text = message.text || '';
+						if (lastLocalUserText !== null && text.trim() === lastLocalUserText.trim()) {
+							lastLocalUserText = null;
+							return;
+						}
+						renderMessage(message);
+						return;
+					}
+					renderMessage(message);
 					return;
 				}
+
 				if (frame.kind === 'event') {
-					if (frame.type === 'agent_end' || frame.type === 'agent_settled') streamingEl = null;
-					const detail = frame.detail && Object.keys(frame.detail).length ? ' ' + JSON.stringify(frame.detail) : '';
-					addStatus('· ' + frame.type + detail);
+					const type = frame.type || '';
+					const detail = frame.detail || {};
+					if (type === 'agent_start') {
+						setBusy(true);
+						tmpRows = [];
+						return;
+					}
+					if (type === 'agent_end' || type === 'agent_settled') {
+						setBusy(false);
+						streaming = null;
+						return;
+					}
+					if (type === 'turn_start') return;
+					if (type === 'tool_execution_start') {
+						startToolRow(detail);
+						return;
+					}
+					if (type === 'tool_execution_end') {
+						endToolRow(detail);
+						return;
+					}
+					if (type === 'turn_end') {
+						const reason = String(detail.reason || '');
+						if (reason && !/^(completed|stop|end_turn|tool_use|success)$/i.test(reason)) {
+							addStatusRow('回合结束 · ' + reason);
+						}
+						return;
+					}
+					const extra = [detail.name, detail.status, detail.reason].filter(Boolean).join(' · ');
+					addStatusRow(type + (extra ? ' · ' + extra : ''), /error|fail/i.test(type) ? 'error' : 'status');
 					return;
 				}
+
 				if (frame.kind === 'error') {
-					addStatus('错误：' + frame.message);
+					addStatusRow(String(frame.message || '未知错误'), 'error');
 				}
 			}
 
-			/** 建立 SSE 连接（断线后浏览器会自动重连）。 */
+			/** 建立 SSE 连接（浏览器会在断线后自动重连）。 */
 			function connect() {
 				const source = new EventSource('/api/events');
 				source.onmessage = (event) => {
@@ -357,39 +1514,104 @@
 						/* 忽略无法解析的帧 */
 					}
 				};
-				source.onerror = () => renderContext({ cwd: '连接中断，正在重试…' });
+				source.onerror = () => {
+					metaEl.textContent = '连接中断，正在重试…';
+					setBusy(false);
+				};
 				return source;
 			}
 
-			/** 发送一条消息（运行中时服务端会自动改为 steer）。 */
+			/** 发送一条消息（运行中时服务端会自动转为 steer）。 */
 			async function send() {
 				const text = inputEl.value.trim();
 				if (!text) return;
+				// 页面内命令（/resume、/new）只在本页处理，不发给模型
+				if (await runCommand(text)) return;
 				inputEl.value = '';
-				addMessage('user', text);
+				autoGrow();
+				addUserMessage(text);
+				if (pinnedToBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
 				await fetch('/api/prompt', {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
 					body: JSON.stringify({ message: text }),
-				}).catch(() => addStatus('发送失败'));
+				}).catch(() => addStatusRow('发送失败：本地服务没有响应', 'error'));
+			}
+
+			/** 输入框按内容自动增高（1～8 行左右）。 */
+			function autoGrow() {
+				inputEl.style.height = 'auto';
+				inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + 'px';
 			}
 
 			sendEl.addEventListener('click', () => void send());
+			inputEl.addEventListener('input', () => {
+				autoGrow();
+				refreshCommands();
+			});
 			inputEl.addEventListener('keydown', (event) => {
+				// 选择器打开时，键盘先服务于选择器
+				if (pickerOpen) {
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						closeSessionPicker();
+						return;
+					}
+					if (event.key === 'ArrowDown') {
+						event.preventDefault();
+						movePicker(1);
+						return;
+					}
+					if (event.key === 'ArrowUp') {
+						event.preventDefault();
+						movePicker(-1);
+						return;
+					}
+					if (event.key === 'Enter') {
+						event.preventDefault();
+						const info = pickerItems[pickerIndex];
+						if (info) void switchSession(info.path);
+						return;
+					}
+					return;
+				}
+				// 命令提示条打开时，键盘先服务于提示条
+				if (commandOpen) {
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						hideCommands();
+						return;
+					}
+					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+						event.preventDefault();
+						moveCommand(event.key === 'ArrowDown' ? 1 : -1);
+						return;
+					}
+					if (event.key === 'Enter' || event.key === 'Tab') {
+						event.preventDefault();
+						const command = commandMatches[commandIndex];
+						if (command) void runCommand(command.name);
+						return;
+					}
+				}
 				if (event.key === 'Enter' && !event.shiftKey) {
 					event.preventDefault();
 					void send();
 				}
 			});
+			inputEl.addEventListener('blur', hideCommands);
+			overlayEl.addEventListener('click', (event) => {
+				if (event.target === overlayEl) closeSessionPicker();
+			});
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape' && pickerOpen) closeSessionPicker();
+			});
 			document.getElementById('abort').addEventListener('click', () => {
-				void fetch('/api/abort', { method: 'POST' });
+				void fetch('/api/abort', { method: 'POST' }).catch(() => {});
 			});
-			document.getElementById('new').addEventListener('click', async () => {
-				await fetch('/api/new', { method: 'POST' }).catch(() => {});
-				clearMessages();
-				addStatus('已开始新会话');
-			});
+			document.getElementById('new').addEventListener('click', () => void newSession());
 
+			showEmptyHint();
 			fetch('/api/context')
 				.then((response) => response.json())
 				.then((data) => renderContext(data.context))
