@@ -1041,10 +1041,8 @@
 				pending: ['○', '等待结果'], running: ['…', '运行中'],
 				done: ['✓', '完成'], failed: ['!', '失败'], unknown: ['?', '未确认'],
 			};
-			/** 本地已画出的用户消息文本，用于跳过服务端回显造成的重复。 */
-			let lastLocalUserText = null;
-			/** 本地已画出的用户行，服务端回显时把 entryId 补到它上面。 */
-			let lastLocalUserRow = null;
+			/** 本地已画出、还在等服务端回显的用户行：{ text, row }，按发送顺序排队。 */
+			let pendingUserRows = [];
 			/** 当前会话文件路径（用于在选择器里标记当前项）。 */
 			let currentSessionPath = '';
 			/** 会话选择器（/resume）状态。 */
@@ -1162,8 +1160,7 @@
 				thinkingRow = null;
 				pendingAssistant = null;
 				toolRecords.clear();
-				lastLocalUserText = null;
-				lastLocalUserRow = null;
+				pendingUserRows = [];
 				historyRows = 0;
 				showEmptyHint();
 			}
@@ -1919,8 +1916,9 @@
 				const pinned = pinnedToBottom();
 				const { row, body } = createMessageRow('user', 'YOU');
 				addBlock(body, { type: 'text', text });
-				lastLocalUserText = text;
-				lastLocalUserRow = row;
+				// 记下这一行，等服务端回显时把会话条目 id 补上（也用于跳过回显造成的重复）
+				pendingUserRows.push({ text: String(text), row });
+				if (pendingUserRows.length > 20) pendingUserRows.shift();
 				if (pinned) messagesEl.scrollTop = messagesEl.scrollHeight;
 				syncJumpButtons();
 			}
@@ -2918,11 +2916,14 @@
 							settleAssistantMessage(message);
 							return;
 						}
-						if (message.role === 'user' && lastLocalUserText !== null && String(message.text || '').trim() === lastLocalUserText.trim()) {
-							// 本地已经画过这条消息，只把服务端给的 entryId 补到那一行，不重复渲染
-							if (lastLocalUserRow && message.entryId) lastLocalUserRow.dataset.entryId = message.entryId;
-							lastLocalUserText = null;
-							lastLocalUserRow = null;
+						if (message.role === 'user' && pendingUserRows.length) {
+							// 本地已经画过这条消息：把服务端给的 entryId 补到那一行上，不重复渲染
+							const text = String(message.text || '').trim();
+							let index = pendingUserRows.findIndex((item) => item.text.trim() === text);
+							// 文本被服务端改写过（技能/模板展开）时退回按发送顺序对上，宁可错配也不多画一行
+							if (index < 0) index = 0;
+							const [pending] = pendingUserRows.splice(index, 1);
+							if (pending.row && message.entryId) pending.row.dataset.entryId = message.entryId;
 							return;
 						}
 						renderMessage(message);

@@ -468,6 +468,31 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		return null;
 	}
 
+	/**
+	 * 攒着等条目 id 的用户消息回显帧。
+	 * pi 是先发 message_end 事件、之后才写会话文件，事件回调里查不到条目 id；
+	 * 把这一帧攒到写库之后（下一拍或下一个事件）再发，页面才能给本地那行标上回退目标。
+	 */
+	let pendingEcho = null;
+
+	/** 暂存一条用户消息回显；先补发上一条，避免连发时丢帧。 */
+	function deferUserEcho(message) {
+		flushUserEcho();
+		pendingEcho = { message, timer: setTimeout(flushUserEcho, 0) };
+	}
+
+	/** 把攒着的回显帧补上条目 id 后发出；没有则什么也不做。 */
+	function flushUserEcho() {
+		if (!pendingEcho) return;
+		const { message, timer } = pendingEcho;
+		pendingEcho = null;
+		if (timer) clearTimeout(timer);
+		const frame = eventFrame({ type: 'message_end', message });
+		// 查不到 id（极端时序）也照发：退回到“这行暂时不能回退”，不影响消息本身
+		if (frame?.message) frame.message.entryId = resolveEntryId(message);
+		broadcast(frame);
+	}
+
 	/** 正在跑的回合（起始时刻 + 起始用户消息的条目 id）；空闲时为 null，页面据此在刷新后接着计时。 */
 	function currentTurnInfo() {
 		if (!turn) return null;
@@ -817,9 +842,10 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 	 */
 	async function boot() {
 		// 换会话前先把旧会话手上的对话框交回（否则那些 Promise 永远不会被 resolve）、
-		// 把耗时的最后一批落盘、挂着的标题补发（都依赖 active，必须在替换前调用）
+		// 把耗时的最后一批落盘、挂着的标题补发、攒着的回显帧补发（都依赖 active，必须在替换前调用）
 		settleAllUI();
 		flushTitle();
+		flushUserEcho();
 		flushTimings();
 		if (active) {
 			try {
@@ -840,6 +866,14 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			if (event?.type === 'agent_start') busy = true;
 			if (event?.type === 'agent_settled') busy = false;
 			// 计时和转发在同一个回调里做：实测耗时随这一条 message 帧一起下发
+			if (event?.type === 'message_end' && event.message?.role === 'user') {
+				// 用户消息回显要等写库后才能取条目 id，先攒起来
+				trackTiming(event);
+				deferUserEcho(event.message);
+				return;
+			}
+			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
+			flushUserEcho();
 			broadcast(eventFrame(event, trackTiming(event)));
 		});
 		active = { session, unsubscribe };
@@ -1177,6 +1211,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		settleAllUI();
 		cancelUIGrace();
 		if (uiTitleTimer) clearTimeout(uiTitleTimer);
+		flushUserEcho();
 		flushTimings();
 		for (const client of clients) {
 			try {
