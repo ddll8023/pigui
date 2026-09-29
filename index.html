@@ -738,6 +738,8 @@
 				{ name: '/resume', desc: '切换会话' },
 				{ name: '/new', desc: '新建会话' },
 			];
+			/** 已渲染出来的历史行数（判断是否需要空态提示）。 */
+			let historyRows = 0;
 			/** 命令提示条状态。 */
 			let commandOpen = false;
 			let commandMatches = [];
@@ -1292,16 +1294,21 @@
 					closeSessionPicker();
 					return;
 				}
-				const response = await fetch('/api/switch', {
-					method: 'POST',
-					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ sessionFile }),
-				}).catch(() => null);
-				if (!response || !response.ok) {
-					addStatusRow('切换会话失败', 'error');
-					return;
+				// 不论成功还是失败都要收起浮层，否则遮罩会一直盖住页面
+				try {
+					const response = await fetch('/api/switch', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ sessionFile }),
+					});
+					if (!response.ok) {
+						addStatusRow('切换会话失败（HTTP ' + response.status + '）', 'error');
+					}
+				} catch (err) {
+					addStatusRow('切换会话失败：' + String((err && err.message) || err), 'error');
+				} finally {
+					closeSessionPicker();
 				}
-				closeSessionPicker();
 			}
 
 			/** 当前输入是否处于命令输入状态（以 / 开头且还没打空格），否则返回 null。 */
@@ -1412,16 +1419,26 @@
 			/** 处理服务端推来的每一帧。 */
 			function handleFrame(frame) {
 				if (frame.kind === 'history') {
-					messagesEl.replaceChildren();
-					seq = 0;
-					streaming = null;
-					thinkingRow = null;
-					tmpRows = [];
-					toolRows.clear();
-					lastLocalUserText = null;
-					const messages = frame.messages || [];
-					for (const message of messages) renderMessage(message);
-					if (!messages.length) showEmptyHint();
+					// 历史可能被服务端切成多片（part / parts），第一片到达时清空重绘
+					if (!frame.part) {
+						messagesEl.replaceChildren();
+						seq = 0;
+						streaming = null;
+						thinkingRow = null;
+						tmpRows = [];
+						toolRows.clear();
+						lastLocalUserText = null;
+						historyRows = 0;
+					}
+					for (const message of frame.messages || []) {
+						// 单条消息渲染失败不能连累整段历史
+						try {
+							if (renderMessage(message)) historyRows += 1;
+						} catch (err) {
+							addStatusRow('history 渲染跳过：' + String((err && err.message) || err), 'error');
+						}
+					}
+					if ((frame.part || 0) === (frame.parts || 1) - 1 && !historyRows) showEmptyHint();
 					return;
 				}
 

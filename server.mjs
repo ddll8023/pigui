@@ -16,8 +16,12 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
-/** 单帧 SSE 上限：超过则丢弃原文，只发一个截断通知。 */
+/** 单帧 SSE 上限：超过则丢弃原文，只发一个截断通知（history 走分片，不受此限）。 */
 const MAX_FRAME_BYTES = 256 * 1024;
+/** history 分片的目标大小：超过就切成多帧发，避免被单帧上限整体丢弃。 */
+const HISTORY_PART_BYTES = 128 * 1024;
+/** 单个内容块的文本上限：超出截断，避免工具输出这类几 MB 的内容把一帧撑爆。 */
+const MAX_BLOCK_TEXT = 48 * 1024;
 /** 请求体上限，防止超大 POST。 */
 const MAX_BODY_BYTES = 1024 * 1024;
 /** 页面文件路径。 */
@@ -90,6 +94,14 @@ function messageView(message) {
 				}
 			}
 			if (!block.text && block.arguments) block.text = block.arguments;
+			// 超大块（例如几 MB 的工具输出）先截断，否则单条消息自己就能撑爆一帧
+			for (const key of ['text', 'arguments']) {
+				const value = block[key];
+				if (typeof value === 'string' && value.length > MAX_BLOCK_TEXT) {
+					block[key] = `${value.slice(0, MAX_BLOCK_TEXT)}\n…（已截断，原文 ${value.length} 字节）`;
+					block.truncated = true;
+				}
+			}
 			blocks.push(block);
 		}
 	}
@@ -99,6 +111,36 @@ function messageView(message) {
 		.join('\n')
 		.trim();
 	return { role, text, blocks };
+}
+
+/**
+ * 把历史消息切成若干帧：每片不超过 HISTORY_PART_BYTES，片信息放在 part / parts 里。
+ *
+ * 页面按 part 顺序拼接（part 为 0 时清空重绘），这样几 MB 的长会话也能完整送达，
+ * 不会被 MAX_FRAME_BYTES 整体丢弃成 frame_truncated。
+ */
+function historyFrames(messages) {
+	const views = messages.map(messageView);
+	const batches = [];
+	let batch = [];
+	let size = 0;
+	for (const view of views) {
+		const viewSize = Buffer.byteLength(JSON.stringify(view));
+		if (batch.length && size + viewSize > HISTORY_PART_BYTES) {
+			batches.push(batch);
+			batch = [];
+			size = 0;
+		}
+		batch.push(view);
+		size += viewSize;
+	}
+	if (batch.length || !batches.length) batches.push(batch);
+	return batches.map((list, index) => ({
+		kind: 'history',
+		messages: list,
+		part: index,
+		parts: batches.length,
+	}));
 }
 
 /**
@@ -213,10 +255,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			info: { ...sessionInfo(), modelFallbackMessage: modelFallbackMessage || undefined },
 		});
 		// 新建 / 切换会话后要让页面立即重放历史（history 帧平时只在 SSE 建连时发一次）
-		broadcast({
-			kind: 'history',
-			messages: (session.state?.messages ?? []).map(messageView),
-		});
+		for (const frame of historyFrames(session.state?.messages ?? [])) broadcast(frame);
 		return active;
 	}
 
@@ -283,9 +322,9 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				});
 				clients.add(res);
 				res.write(`data: ${JSON.stringify({ kind: 'session', info: sessionInfo() })}\n\n`);
-				res.write(
-					`data: ${JSON.stringify({ kind: 'history', messages: (active?.session?.state?.messages ?? []).map(messageView) })}\n\n`,
-				);
+				for (const frame of historyFrames(active?.session?.state?.messages ?? [])) {
+					res.write(`data: ${JSON.stringify(frame)}\n\n`);
+				}
 				const keepAlive = setInterval(() => {
 					try {
 						res.write(': ping\n\n');
