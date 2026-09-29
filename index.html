@@ -211,6 +211,8 @@
 			}
 			.gutter .idx { font-variant-numeric: tabular-nums; color: var(--faint); }
 			.gutter .who { font-weight: 600; color: var(--muted); }
+			/* 耗时：单条 AI 回复挂在助手行，回合合计挂在提问行，都跟着身份区走 */
+			.gutter .dur { font-variant-numeric: tabular-nums; color: var(--faint); white-space: nowrap; }
 			.row.assistant .who {
 				display: grid;
 				place-items: center;
@@ -227,6 +229,7 @@
 			.row.user { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; gap: 4px; width: fit-content; max-width: 80%; }
 			.row.user .gutter { flex-direction: row; gap: 8px; padding: 0 3px; }
 			.row.user .who { color: var(--text); }
+			.row.user .gutter .dur { color: var(--muted); }
 			.row.user > .body { max-width: 100%; padding: 10px 14px; background: var(--text); color: #f5f7f8; border-radius: 16px 4px 16px 16px; }
 			.row.user .body code { color: inherit; background: #ffffff14; border-color: #ffffff25; }
 			.row.user .body a, .row.user .body .task-box { color: #fff; }
@@ -524,6 +527,10 @@
 				font: 12.5px/1.6 var(--sans);
 				color: var(--accent);
 			}
+			.row.warn .body {
+				font: 12px/1.6 var(--mono);
+				color: var(--tool);
+			}
 
 			/* ---------- 输入区 ---------- */
 			#composer { flex: none; padding: 8px 24px 10px; background: var(--bg); border-top: 1px solid var(--line); }
@@ -788,6 +795,63 @@
 				color: var(--faint);
 			}
 
+			/* ---------- 插件对话框与状态（扩展 UI） ---------- */
+			.ui-message {
+				margin: 0;
+				padding: 10px 12px 2px;
+				font-size: 13px;
+				line-height: 1.6;
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+			.ui-message[hidden] {
+				display: none;
+			}
+			.ui-field {
+				flex: none;
+				margin: 10px 12px;
+				padding: 8px 9px;
+				border: 1px solid var(--line-strong);
+				border-radius: 4px;
+				background: var(--panel);
+				color: var(--text);
+				font: 13px/1.5 var(--mono);
+				resize: vertical;
+			}
+			.ui-field:focus {
+				outline: none;
+				border-color: var(--accent);
+			}
+			.plugin-widget {
+				max-width: 1072px;
+				margin: 0 auto 6px;
+				padding: 6px 9px;
+				border: 1px solid var(--line);
+				border-radius: 4px;
+				background: var(--panel);
+				font: 11px/1.5 var(--mono);
+				color: var(--muted);
+				white-space: pre-wrap;
+				overflow-wrap: anywhere;
+			}
+			.plugin-widget:last-child {
+				margin-bottom: 0;
+			}
+			.plugin-status {
+				grid-area: 3 / 1 / auto / -1;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 2px 12px;
+				font: 10px/1.5 var(--mono);
+				color: var(--muted);
+			}
+			.plugin-status .item {
+				max-width: 42vw;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+
 			/* ---------- 窄屏：收紧外边距，保留全部操作与角色差异 ---------- */
 			@media (max-width: 760px) {
 				.topbar { flex-wrap: wrap; gap: 6px 10px; padding: 8px 12px; }
@@ -837,6 +901,7 @@
 		<main id="messages" aria-label="会话消息"></main>
 
 		<footer id="composer">
+			<div class="plugin-widget" id="widgetAbove" hidden></div>
 			<div class="composer-box">
 				<div class="cmdbar" id="cmdbar" hidden>
 					<ul class="cmd-list" id="cmdList"></ul>
@@ -844,7 +909,9 @@
 				<textarea id="input" rows="1" aria-label="输入消息" placeholder="输入消息…（打一个 / 查看命令）"></textarea>
 				<button id="send">发送</button>
 				<div class="hint">Enter 发送 · Shift+Enter 换行 · /model 模型 · /resume 会话 · /new 新建 · /rewind 回退</div>
+				<div class="plugin-status" id="pluginStatus" hidden></div>
 			</div>
+			<div class="plugin-widget" id="widgetBelow" hidden></div>
 		</footer>
 
 		<div class="overlay" id="overlay" hidden>
@@ -885,6 +952,20 @@
 			</div>
 		</div>
 
+		<div class="overlay" id="uiOverlay" hidden>
+			<div class="picker" role="dialog" aria-modal="true" aria-labelledby="uiTitle">
+				<div class="picker-head">
+					<span class="picker-title" id="uiTitle">插件请求</span>
+					<span class="picker-key" id="uiKey">Esc 取消</span>
+				</div>
+				<p class="ui-message" id="uiMessage" hidden></p>
+				<ul class="picker-list" id="uiList" tabindex="-1" hidden></ul>
+				<input class="ui-field" id="uiInput" type="text" autocomplete="off" spellcheck="false" hidden />
+				<textarea class="ui-field" id="uiEditor" rows="7" spellcheck="false" hidden></textarea>
+				<div class="picker-foot" id="uiFoot"></div>
+			</div>
+		</div>
+
 		<div class="overlay" id="modelOverlay" hidden>
 			<div class="picker" role="dialog" aria-label="切换模型">
 				<div class="picker-head">
@@ -909,7 +990,7 @@
 			/* pigui 前端脚本：只负责渲染服务端推来的帧，不含任何业务判断。
 			   服务端接口：GET /api/context · GET /api/models · POST /api/prompt · POST /api/model · POST /api/thinking
 			              POST /api/abort · POST /api/new · POST /api/rewind · SSE /api/events
-			   帧类型：history / session / delta / thinking / message / event / error */
+			   帧类型：history / session / delta / thinking / timer / message / event / error */
 
 			const messagesEl = document.getElementById('messages');
 			const metaEl = document.getElementById('meta');
@@ -930,6 +1011,17 @@
 			const navListEl = document.getElementById('navList');
 			const rewindOverlayEl = document.getElementById('rewindOverlay');
 			const rewindListEl = document.getElementById('rewindList');
+			const uiOverlayEl = document.getElementById('uiOverlay');
+			const uiTitleEl = document.getElementById('uiTitle');
+			const uiKeyEl = document.getElementById('uiKey');
+			const uiMessageEl = document.getElementById('uiMessage');
+			const uiListEl = document.getElementById('uiList');
+			const uiInputEl = document.getElementById('uiInput');
+			const uiEditorEl = document.getElementById('uiEditor');
+			const uiFootEl = document.getElementById('uiFoot');
+			const pluginStatusEl = document.getElementById('pluginStatus');
+			const widgetAboveEl = document.getElementById('widgetAbove');
+			const widgetBelowEl = document.getElementById('widgetBelow');
 			const modelOverlayEl = document.getElementById('modelOverlay');
 			const modelSearchEl = document.getElementById('modelSearch');
 			const thinkBarEl = document.getElementById('thinkBar');
@@ -976,6 +1068,19 @@
 			let rewindOpen = false;
 			let rewindItems = [];
 			let rewindIndex = 0;
+			/** 插件对话框队列（扩展的 select / confirm / input / editor 会阻塞等待页面回答）。 */
+			let uiQueue = [];
+			let uiActive = null;
+			let uiIndex = 0;
+			let uiTimeoutTimer = 0;
+			let uiDeadline = 0;
+			/** 插件状态槽与部件：按 key 覆盖，空值删除（由插件自己维护生命周期）。 */
+			const pluginStatus = new Map();
+			const pluginWidgets = new Map();
+			/** 插件加载情况的提示签名，避免每次 session 帧重复刷屏。 */
+			let pluginNoticeKey = '';
+			/** 页面原始标题（插件改过标题后用于还原）。 */
+			const defaultTitle = document.title;
 			/** 滚动节流的 rAF 句柄。 */
 			let jumpFrame = 0;
 			/** 命令提示条状态。 */
@@ -1028,24 +1133,30 @@
 				who.className = 'who';
 				who.textContent = label;
 				gutter.append(who);
+				// 耗时槽位先占位不显示，setRowDuration 填值时才露出
+				const dur = document.createElement('span');
+				dur.className = 'dur';
+				dur.hidden = true;
+				gutter.append(dur);
 				const body = document.createElement('div');
 				body.className = 'body';
 				row.append(gutter, body);
-				return { row, body };
+				return { row, body, dur };
 			}
 
 			/** 生成一条正式消息行（占用序号）；entryId 用于回退时定位会话树节点。 */
 			function createMessageRow(kind, label, entryId) {
 				seq += 1;
-				const { row, body } = createRow(kind, label, { index: seq });
+				const { row, body, dur } = createRow(kind, label, { index: seq });
 				if (entryId) row.dataset.entryId = entryId;
 				appendRow(row);
-				return { row, body };
+				return { row, body, dur };
 			}
 
 			/** 清空全部消息并复位计数（新建会话时用）。 */
 			function clearMessages() {
 				messagesEl.replaceChildren();
+				resetTimers();
 				seq = 0;
 				streaming = null;
 				thinkingRow = null;
@@ -1064,6 +1175,106 @@
 				node.className = 'empty';
 				node.textContent = '在下面输入第一条消息，pi 会在当前工作目录开始工作。';
 				messagesEl.append(node);
+			}
+
+			/** 耗时文本：一分钟内保留一位小数，超过则按 1m03s 给。 */
+			function formatDuration(ms) {
+				const value = Math.max(0, Number(ms) || 0);
+				if (value < 60000) return (value / 1000).toFixed(1) + 's';
+				const seconds = Math.round(value / 1000);
+				return Math.floor(seconds / 60) + 'm' + String(seconds % 60).padStart(2, '0') + 's';
+			}
+
+			/** 把耗时写进某行的身份区；数值无效或行已不在 DOM 里就什么也不做。 */
+			function setRowDuration(row, ms, prefix) {
+				if (!row || !Number.isFinite(ms)) return;
+				const dur = row.querySelector('.gutter .dur');
+				if (!dur) return;
+				dur.textContent = (prefix || '') + formatDuration(ms);
+				dur.hidden = false;
+			}
+
+			/** 正在跳动的计时器：row → { baseMs, baseAt, prefix }；baseMs 是挂上时已经过去的毫秒数。 */
+			const liveTimers = new Map();
+			/** 计时刷新句柄；没有活跃计时器时为 0。 */
+			let timerHandle = 0;
+			/** 当前回合计时挂在哪一行（收到回合结束帧时用它定格）。 */
+			let turnTimerRow = null;
+
+			/** 刷新所有活跃计时器的文本；没有活跃计时器就顺手停掉定时器。 */
+			function paintTimers() {
+				for (const [row, timer] of liveTimers) {
+					setRowDuration(row, timer.baseMs + (Date.now() - timer.baseAt), timer.prefix);
+				}
+				if (!liveTimers.size && timerHandle) {
+					clearInterval(timerHandle);
+					timerHandle = 0;
+				}
+			}
+
+			/** 开一行计时；baseMs 是挂上时已经过去的时间（断线重连后接着跳时非 0）。 */
+			function startRowTimer(row, baseMs, prefix) {
+				if (!row) return;
+				liveTimers.set(row, { baseMs: Math.max(0, Number(baseMs) || 0), baseAt: Date.now(), prefix: prefix || '' });
+				if (!timerHandle) timerHandle = setInterval(paintTimers, 100);
+				paintTimers();
+			}
+
+			/** 定格一行计时；没拿到服务端数值时用本地已经跑过的时间兜底。 */
+			function settleRowTimer(row, ms, prefix) {
+				if (!row) return;
+				const live = liveTimers.get(row);
+				liveTimers.delete(row);
+				const tag = prefix || (live ? live.prefix : '');
+				if (Number.isFinite(ms)) setRowDuration(row, ms, tag);
+				else if (live) setRowDuration(row, live.baseMs + (Date.now() - live.baseAt), tag);
+				paintTimers();
+			}
+
+			/** 清掉全部计时状态（重放历史、新建会话时调用）。 */
+			function resetTimers() {
+				liveTimers.clear();
+				turnTimerRow = null;
+				if (timerHandle) {
+					clearInterval(timerHandle);
+					timerHandle = 0;
+				}
+			}
+
+			/** 最后一个用户行：回合计时挂它（刚发出的那条提问一定在最后）。 */
+			function lastUserRow() {
+				const rows = messagesEl.querySelectorAll('.row.user');
+				return rows.length ? rows[rows.length - 1] : null;
+			}
+
+			/** 按会话条目 id 找行（刷新后把回合计时接回正确的提问行）。 */
+			function rowByEntryId(entryId) {
+				if (!entryId) return null;
+				for (const row of messagesEl.querySelectorAll('.row[data-entry-id]')) {
+					if (row.dataset.entryId === entryId) return row;
+				}
+				return null;
+			}
+
+			/** 计时帧：message 挂在当前助手行，turn 挂在本次提问行（回合总耗时跟着提问走）。 */
+			function handleTimerFrame(frame) {
+				if (frame.scope === 'turn') {
+					if (frame.phase === 'start') {
+						turnTimerRow = lastUserRow();
+						startRowTimer(turnTimerRow, 0, '回合 ');
+						return;
+					}
+					settleRowTimer(turnTimerRow || lastUserRow(), frame.durationMs, '回合 ');
+					turnTimerRow = null;
+					return;
+				}
+				// 单条耗时的结束值通常随 message 帧的 durationMs 一起下发，这里只是兼容显式的结束帧
+				if (frame.phase === 'end') {
+					settleRowTimer(ensurePendingAssistant().row, frame.durationMs);
+					return;
+				}
+				// 先建行再开始跳：等首 token 期间也能看到时间在走
+				startRowTimer(ensurePendingAssistant().row, 0);
 			}
 
 			/** 语言别名归一化，便于复用同一套着色规则。 */
@@ -1695,6 +1906,9 @@
 					return null;
 				}
 				const { row, body } = createMessageRow(kind, label, message.entryId);
+				// 历史帧带落盘的耗时：assistant 是单次模型调用，user 是该回合合计
+				if (role === 'assistant') setRowDuration(row, message.durationMs);
+				else if (role === 'user') setRowDuration(row, message.turnMs, '回合 ');
 				if (blocks.length) for (const block of blocks) addBlock(body, block);
 				else if (message.text) addBlock(body, { type: 'text', text: message.text });
 				return row;
@@ -1789,6 +2003,8 @@
 				else if (message.text) addBlock(target.body, { type: 'text', text: message.text });
 				// 完整消息不含某个临时调用时保留独立记录，不能随重绘一起删除输出。
 				for (const entry of displaced) attachStandaloneTool(entry);
+				// 单次模型调用耗时：以服务端实测为准，缺了就按本地已经跑过的时间定格
+				settleRowTimer(target.row, message.durationMs);
 				pendingAssistant = null;
 				streaming = null;
 				thinkingRow = null;
@@ -1796,8 +2012,11 @@
 			}
 
 			/** 追加一条状态行（事件、错误）。 */
+			/** 追加一条状态行（事件、插件通知、错误）；kind 取 warn / error，其它按普通状态处理。 */
 			function addStatusRow(text, kind) {
-				const { row, body } = createRow(kind === 'error' ? 'error' : 'status', kind === 'error' ? 'ERR' : 'EV');
+				const isError = kind === 'error';
+				const isWarn = kind === 'warn';
+				const { row, body } = createRow(isError ? 'error' : isWarn ? 'warn' : 'status', isError ? 'ERR' : isWarn ? 'WARN' : 'EV');
 				body.textContent = text;
 				appendRow(row);
 			}
@@ -2388,6 +2607,231 @@
 				jumpsEl.style.bottom = composerEl.offsetHeight + 12 + 'px';
 			}
 
+			/* ---------- 插件界面（扩展 ui.* 桥接到页面） ---------- */
+
+			/** 插件界面帧：对话框（ask/resolved）、通知、状态、部件、标题、写入输入框。 */
+			function handleUIFrame(frame) {
+				const phase = frame.phase;
+				if (phase === 'ask') {
+					// 重连时服务端会把未决对话框重发一遍，同一个 id 只留一份
+					if (uiQueue.some((item) => item.id === frame.id)) return;
+					uiQueue.push(frame);
+					if (!uiActive) showNextUI();
+					return;
+				}
+				if (phase === 'resolved') {
+					uiQueue = uiQueue.filter((item) => item.id !== frame.id);
+					if (uiActive && uiActive.id === frame.id) {
+						hideUI();
+						showNextUI();
+					}
+					return;
+				}
+				if (phase === 'notice') {
+					const kind = frame.level === 'error' ? 'error' : frame.level === 'warning' ? 'warn' : undefined;
+					if (frame.message) addStatusRow(frame.message, kind);
+					return;
+				}
+				if (phase === 'status') {
+					if (frame.text === null || frame.text === undefined) pluginStatus.delete(frame.key);
+					else pluginStatus.set(frame.key, String(frame.text));
+					paintPluginStatus();
+					return;
+				}
+				if (phase === 'widget') {
+					if (Array.isArray(frame.lines) && frame.lines.length) {
+						pluginWidgets.set(frame.key, { lines: frame.lines, placement: frame.placement });
+					} else {
+						pluginWidgets.delete(frame.key);
+					}
+					paintPluginWidgets();
+					return;
+				}
+				if (phase === 'title') {
+					document.title = frame.title ? `${frame.title} · pigui` : defaultTitle;
+					return;
+				}
+				if (phase === 'editor') {
+					inputEl.value = String(frame.text || '');
+					autoGrow();
+					inputEl.focus();
+				}
+			}
+
+			/** 重画插件状态槽（在输入区下方，多个键并排）；没内容就整块隐藏。 */
+			function paintPluginStatus() {
+				pluginStatusEl.replaceChildren();
+				for (const [key, text] of pluginStatus) {
+					const span = document.createElement('span');
+					span.className = 'item';
+					span.textContent = text;
+					span.title = `${key}: ${text}`;
+					pluginStatusEl.append(span);
+				}
+				pluginStatusEl.hidden = pluginStatus.size === 0;
+			}
+
+			/** 重画插件部件（setWidget 的字符串数组）；按 placement 放到输入区上方或下方。 */
+			function paintPluginWidgets() {
+				const above = [];
+				const below = [];
+				for (const [key, item] of pluginWidgets) (item.placement === 'belowEditor' ? below : above).push([key, item]);
+				for (const [el, list] of [
+					[widgetAboveEl, above],
+					[widgetBelowEl, below],
+				]) {
+					el.replaceChildren();
+					for (const [key, item] of list) {
+						const block = document.createElement('div');
+						// 插件可能已经给文本上过 ANSI 颜色，页面里直接显示转义序列，这里剥掉
+						block.textContent = item.lines.join('\n').replace(/\u001b\[[0-9;]*m/g, '');
+						block.title = key;
+						el.append(block);
+					}
+					el.hidden = list.length === 0;
+				}
+			}
+
+			/** 关闭当前对话框（本地收尾；不代表已经回答）。 */
+			function hideUI() {
+				uiActive = null;
+				uiIndex = 0;
+				if (uiTimeoutTimer) {
+					clearInterval(uiTimeoutTimer);
+					uiTimeoutTimer = 0;
+				}
+				uiOverlayEl.hidden = true;
+			}
+
+			/** 弹出队首对话框；队列空了就把焦点还给输入框。 */
+			function showNextUI() {
+				uiActive = uiQueue[0] || null;
+				if (!uiActive) {
+					hideUI();
+					inputEl.focus();
+					return;
+				}
+				renderUI();
+			}
+
+			/** 渲染当前对话框：列表选择 / 确认 / 单行输入 / 多行编辑。 */
+			function renderUI() {
+				const item = uiActive;
+				const isList = item.method === 'select' || item.method === 'confirm';
+				uiOverlayEl.hidden = false;
+				uiTitleEl.textContent = item.title || '插件请求';
+				uiMessageEl.hidden = !item.message;
+				uiMessageEl.textContent = item.message || '';
+				uiListEl.hidden = !isList;
+				uiInputEl.hidden = item.method !== 'input';
+				uiEditorEl.hidden = item.method !== 'editor';
+				uiIndex = 0;
+				if (isList) {
+					// 确认对话当成两项列表（确认 / 取消），键位与选择一致
+					const options = item.method === 'confirm' ? ['确认', '取消'] : item.options || [];
+					uiListEl.replaceChildren();
+					options.forEach((option, index) => {
+						const li = document.createElement('li');
+						li.className = 'picker-item';
+						li.dataset.active = String(index === 0);
+						const mark = document.createElement('span');
+						mark.className = 'mark';
+						mark.textContent = String(index + 1);
+						const text = document.createElement('span');
+						text.className = 'text';
+						text.textContent = String(option);
+						text.title = String(option);
+						li.append(mark, text);
+						li.addEventListener('click', () => answerUIList(index));
+						uiListEl.append(li);
+					});
+					// 没有选项可选的 select 直接把选择框收起来，只能 Esc 取消
+					uiListEl.hidden = options.length === 0;
+					if (options.length) uiListEl.focus();
+				} else if (item.method === 'input') {
+					uiInputEl.value = '';
+					uiInputEl.placeholder = item.placeholder || '';
+					uiInputEl.focus();
+				} else {
+					uiEditorEl.value = item.prefill || '';
+					uiEditorEl.focus();
+				}
+				uiKeyEl.textContent =
+					item.method === 'select'
+						? '↑↓ 选择 · Enter 确认 · Esc 取消'
+						: item.method === 'confirm'
+							? 'Enter 确认 · Esc 取消'
+							: item.method === 'editor'
+								? 'Ctrl+Enter 提交 · Esc 取消'
+								: 'Enter 提交 · Esc 取消';
+				uiFootEl.textContent = '由插件发起：回答会直接交回该插件，超时或关闭页面会按默认值处理';
+				startUITimeout(item);
+			}
+
+			/** 列表选项被选中：select 回选项文本，confirm 回布尔。 */
+			function answerUIList(index) {
+				const item = uiActive;
+				if (!item) return;
+				if (item.method === 'confirm') return answerUI(item, { confirmed: index === 0 });
+				return answerUI(item, { value: String((item.options || [])[index] ?? '') });
+			}
+
+			/** 上下键移动列表高亮。 */
+			function moveUI(delta) {
+				const item = uiActive;
+				if (!item || (item.method !== 'select' && item.method !== 'confirm')) return;
+				const count = uiListEl.children.length;
+				if (!count) return;
+				uiIndex = (uiIndex + delta + count) % count;
+				[...uiListEl.children].forEach((li, index) => {
+					li.dataset.active = String(index === uiIndex);
+				});
+				const active = uiListEl.children[uiIndex];
+				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+			}
+
+			/** 回答或取消当前对话框：先本地收尾，再上报服务端（失败也不把队列卡住）。 */
+			function answerUI(item, response) {
+				if (!item) return;
+				uiQueue = uiQueue.filter((entry) => entry.id !== item.id);
+				hideUI();
+				showNextUI();
+				void fetch('/api/ui-response', {
+					method: 'POST',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify({ id: item.id, ...response }),
+				}).catch(() => addStatusRow('插件对话框回答发送失败：本地服务没有响应', 'error'));
+			}
+
+			/** 超时倒计时：到点时服务端会按默认值收尾，这里只把剩余时间显示出来。 */
+			function startUITimeout(item) {
+				if (uiTimeoutTimer) {
+					clearInterval(uiTimeoutTimer);
+					uiTimeoutTimer = 0;
+				}
+				if (!Number.isFinite(item.timeout) || item.timeout <= 0) return;
+				uiDeadline = Date.now() + item.timeout;
+				const tick = () => {
+					const left = Math.max(0, Math.ceil((uiDeadline - Date.now()) / 1000));
+					uiFootEl.textContent = `还有 ${left}s 将按默认值处理（${item.method === 'confirm' ? '取消' : '不选择'}）`;
+					if (left <= 0) {
+						clearInterval(uiTimeoutTimer);
+						uiTimeoutTimer = 0;
+					}
+				};
+				uiTimeoutTimer = setInterval(tick, 1000);
+				tick();
+			}
+
+			/** 插件加载情况只提示一次，签名变化（换会话后结果不同）才重新提示。 */
+			function noticePlugins(context) {
+				const key = `${context.pluginUi}|${(context.pluginErrors || []).map((item) => item.path).join(',')}`;
+				if (key === pluginNoticeKey) return;
+				pluginNoticeKey = key;
+				if (context.pluginUi === false) addStatusRow('插件界面不可用（已用 --no-plugin-ui 关闭，或 pi SDK 版本过旧）：插件里的确认框与选择菜单不会出现', 'warn');
+				for (const item of context.pluginErrors || []) addStatusRow(`插件加载失败：${item.path || '(未知)'} — ${item.error || ''}`, 'error');
+			}
+
 			/** 更新顶栏运行状态。 */
 			function setBusy(next) {
 				const busy = Boolean(next);
@@ -2415,6 +2859,15 @@
 				thinkLevel = context.thinkingLevel || thinkLevel;
 				if (modelOpen) renderThinkBar();
 				setBusy(context.busy);
+				noticePlugins(context);
+				// 刷新或重连时回合还在跑：把回合计时接到对应提问行上继续跳
+				if (context.turn && Number.isFinite(context.turn.startedAt)) {
+					const row = rowByEntryId(context.turn.entryId) || lastUserRow();
+					if (row) {
+						turnTimerRow = row;
+						startRowTimer(row, Date.now() - context.turn.startedAt, '回合 ');
+					}
+				}
 			}
 
 			/** 按帧更新消息；变更前记录滚动意图，工具回填或长增量不能使底部跟随失效。 */
@@ -2439,6 +2892,14 @@
 					if (frame.kind === 'session') {
 						renderContext(frame.info);
 						if (frame.info && frame.info.modelFallbackMessage) addStatusRow('提示：' + frame.info.modelFallbackMessage);
+						return;
+					}
+					if (frame.kind === 'ui') {
+						handleUIFrame(frame);
+						return;
+					}
+					if (frame.kind === 'timer') {
+						handleTimerFrame(frame);
 						return;
 					}
 					if (frame.kind === 'delta') {
@@ -2476,6 +2937,11 @@
 						}
 						if (type === 'agent_end' || type === 'agent_settled') {
 							setBusy(false);
+							// 兜底：回合结束帧没到或没找到行时，用本地时间把回合计时定格
+							if (turnTimerRow) {
+								settleRowTimer(turnTimerRow, NaN, '回合 ');
+								turnTimerRow = null;
+							}
 							finishPendingTools();
 							pendingAssistant = null;
 							streaming = null;
@@ -2718,6 +3184,41 @@
 			});
 			document.addEventListener('keydown', (event) => {
 				if (event.key === 'Escape' && rewindOpen) closeRewind();
+			});
+			// 插件对话框：焦点在弹窗内部，键盘只作用于当前对话框；点遮罩不关闭，
+			// 因为这是插件在等回答，误点会让回合拿到默认值
+			uiListEl.addEventListener('keydown', (event) => {
+				if (event.key === 'ArrowDown') {
+					event.preventDefault();
+					moveUI(1);
+				} else if (event.key === 'ArrowUp') {
+					event.preventDefault();
+					moveUI(-1);
+				} else if (event.key === 'Enter') {
+					event.preventDefault();
+					answerUIList(uiIndex);
+				} else if (event.key === 'Escape') {
+					event.preventDefault();
+					answerUI(uiActive, { cancelled: true });
+				}
+			});
+			uiInputEl.addEventListener('keydown', (event) => {
+				if (event.key === 'Enter' && !event.shiftKey) {
+					event.preventDefault();
+					answerUI(uiActive, { value: uiInputEl.value });
+				} else if (event.key === 'Escape') {
+					event.preventDefault();
+					answerUI(uiActive, { cancelled: true });
+				}
+			});
+			uiEditorEl.addEventListener('keydown', (event) => {
+				if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+					event.preventDefault();
+					answerUI(uiActive, { value: uiEditorEl.value });
+				} else if (event.key === 'Escape') {
+					event.preventDefault();
+					answerUI(uiActive, { cancelled: true });
+				}
 			});
 			jumpTopEl.addEventListener('click', () => messagesEl.scrollTo({ top: 0, behavior: 'smooth' }));
 			jumpBottomEl.addEventListener('click', () =>

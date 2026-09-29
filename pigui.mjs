@@ -29,12 +29,13 @@ const PACKAGE_SEGMENTS = ['@earendil-works', 'pi-coding-agent'];
 
 /** 解析命令行参数。 */
 function parseArgs(argv) {
-	const options = { noOpen: false, port: 0, mode: 'new', sessionPath: '', help: false };
+	const options = { noOpen: false, port: 0, mode: 'new', sessionPath: '', pluginUi: true, help: false };
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		if (arg === '--no-open') options.noOpen = true;
 		else if (arg === '--new') options.mode = 'new';
 		else if (arg === '--continue') options.mode = 'continue';
+		else if (arg === '--no-plugin-ui') options.pluginUi = false;
 		else if (arg === '--port') options.port = Number(argv[++index] ?? 0) || 0;
 		else if (arg === '--session') options.sessionPath = path.resolve(argv[++index] ?? '');
 		else if (arg === '-h' || arg === '--help') options.help = true;
@@ -55,11 +56,13 @@ function printHelp() {
   --new              新建会话（默认行为）
   --continue         恢复该目录最近一次会话（可能正被 Orca / pi 使用，慎用）
   --session <path>   打开指定的会话文件（优先于 --new / --continue）
+  --no-plugin-ui     不把插件的 ctx.ui 接到页面上（插件退回“没有交互界面”的行为）
   -h, --help         显示本帮助
 
 环境变量：
   PIGUI_PI_SDK       手动指定 pi 包目录或 dist/index.js 路径
   PI_AGENT_DIR       覆盖 pi 配置目录（默认 ~/.pi/agent）
+  PIGUI_PLUGIN_UI    设 0 / false / no 等同于 --no-plugin-ui
 `);
 }
 
@@ -299,6 +302,8 @@ const service = await startServer({
 	mode: options.mode,
 	sessionPath: options.sessionPath,
 	port: options.port,
+	// 页面里的插件界面可以整体关掉，用来排除某个插件在网页上的异常表现
+	pluginUi: options.pluginUi && !/^(0|false|no|off)$/i.test(process.env.PIGUI_PLUGIN_UI ?? ''),
 	onLog: (text) => console.log(text),
 });
 
