@@ -50,11 +50,32 @@ pigui
 | 命令 | 作用 |
 |---|---|
 | `/resume` | 打开会话选择器：`↑`/`↓` 移动、`Enter` 切换、`Esc` 关闭，也可以直接点条目 |
+| `/model` | 打开模型浮层：搜索并切换模型、调整思考等级（详见下节）；也可以写 `/model claude` 把搜索词预填进去 |
 | `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
 
 打一个 `/` 就会出现命令提示条：`↑`/`↓` 移动、`Enter` 或 `Tab` 直接执行，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`）。输入框失焦或不再以 `/` 开头时提示自动收起。
 
-只有完全等于这两个字符串的输入会被当作命令；`/usr/local/bin` 这类以 `/` 开头的普通文本仍会照常发送。
+只有列在命令表里、且完全匹配（`/model` 带参数时首个词匹配）的输入会被当作命令；`/usr/local/bin` 这类以 `/` 开头的普通文本仍会照常发送。
+
+## 模型与思考等级
+
+在输入框执行 `/model` 打开浮层：
+
+| 操作 | 作用 |
+|---|---|
+| 输入文字 | 按 `provider` / 模型 id / 名称子串过滤（忽略大小写） |
+| `↑` / `↓` 或点击 | 选择模型（`●` 标记当前模型，“默认”标记全局默认模型） |
+| `Enter` | 切换当前会话的模型 |
+| `Ctrl+Enter` | 切换模型并写入**全局默认模型**（相当于 pi 里的“设为默认”） |
+| `←` / `→` 或点击等级胶囊 | 调整当前会话的思考等级，立即生效（非思考模型只显示 `off`） |
+| `Esc` / 点遮罩 | 关闭浮层，焦点回到输入框 |
+
+行为说明：
+
+- 可用模型列表来自本机已配鉴权的模型（`ModelRuntime.getAvailableSnapshot()`），没登录过的 provider 不会出现；列表为空时页面会直接提示。
+- 默认只改当前会话（pi 的 `setModel(model, { persist: false })`），会往当前会话 JSONL 里追加一条 `model_change` 记录，**不会**动全局默认模型；只有 `Ctrl+Enter` 才写全局默认。
+- 思考等级只改当前会话，不写全局默认；服务端会按当前模型能力收敛到支持的等级，顶栏元信息里会同步显示当前等级。
+- 运行中（回合未结束）也可以切换模型：新模型从下一次模型请求开始生效，正在进行的那一次请求不受影响。
 
 ## 跳转与导航
 
@@ -71,6 +92,13 @@ pigui
 - 引用 `>`（内部同样按块级渲染）
 - 围栏代码块：语言标签、复制按钮、`js/ts/json/py/bash/html/css/md` 轻量着色
 - 表格：`|` 表格 + 分隔行，支持 `:---:` 对齐，宽表横向滚动
+
+## 工具调用与输出
+
+- 调用行：`⚙ 名称` + 参数（JSON 压成一行，超长省略号、悬停看全文）+ 状态标签。执行中显示「运行中」，消息落定后固定为「完成」（调用行暂不区分调用是否失败）。
+- 输出行：工具输出是独立的一条 `TOOL` 行，默认折叠；摘要为 `工具名 · 输出 · N 行 · M 字节`，服务端判为失败时摘要变红并追加「失败」标记；展开后是冷灰凹陷面板（在白卡内，无描边），内容为等宽纯文本（不着色，最高 400px，超出后面板内部滚动）。
+- 工具执行过程中的增量输出默认不转发，设 `PIGUI_DEBUG=1` 才发。
+- 调用行与输出行不嵌套，按时间先后排列（归属靠工具名与顺序判断）。
 
 ## 环境变量
 
@@ -100,21 +128,24 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 |---|---|---|
 | GET | `/` | 页面（`index.html`） |
 | GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表 |
+| GET | `/api/models` | `{current, default, models, thinkingLevel, thinkingLevels}`；`models` 为本机已配鉴权的可用模型（裁剪后的 `provider/id/name/reasoning/contextWindow/input`，当前模型置顶） |
 | GET | `/api/messages` | 当前会话的消息（`{role, text, blocks}`） |
 | GET | `/api/sessions` | 该目录的会话列表 |
 | GET | `/api/events` | SSE 事件流，连接时先补 `session` 与 `history` 两帧；新建 / 切换会话后也会广播 `session` + `history` |
 | POST | `/api/prompt` | `{message}`；运行中会自动改为 steer |
 | POST | `/api/steer` | `{message}`；强制 steer |
 | POST | `/api/abort` | 中止当前回合 |
+| POST | `/api/model` | `{provider, id, persist?}`；切换模型（默认只改本会话，`persist: true` 同时写全局默认）；不在可用列表内 404，未配鉴权 400 |
+| POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
 | POST | `/api/new` | 新建会话（旧的会被释放） |
 | POST | `/api/switch` | `{sessionFile}`；切换到该目录下的某个会话（不属于该目录则 404） |
 | POST | `/api/shutdown` | 关闭服务 |
 
-SSE 帧类型：`session`（上下文/模型/busy）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`message`（完成的消息）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`；单帧过大时降级为 `frame_truncated`）、`error`。
+SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy；切换模型与思考等级后也会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`message`（完成的消息）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）。
 
-**消息结构**：`{ role, text, blocks }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`）、`toolResult`（带 `toolCallId`，便于折到对应调用下面）；`text` 是全部块拼成的纯文本，供简单渲染使用。
+**消息结构**：`{ role, text, blocks }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`）、`toolResult`（带 `toolCallId`）；`text` 是全部块拼成的纯文本，供简单渲染使用。`role` 为 `toolResult` 的消息额外带消息级字段 `toolName` 与 `isError`（页面据此在输出行显示工具名与失败标记）。
 
 默认不转发 `tool_execution_update`、`message_start`、`turn_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
 

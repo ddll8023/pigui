@@ -30,6 +30,8 @@ const PAGE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index
 const DEBUG = Boolean(process.env.PIGUI_DEBUG);
 /** 默认不转发的高频/噪声事件（页面渲染不需要，只会刷屏）。 */
 const QUIET_EVENT_TYPES = new Set(['tool_execution_update', 'message_start', 'turn_start']);
+/** pi 支持的思考等级（与 pi-agent-core 的 ThinkingLevel 一致）。 */
+const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /**
  * 从任意值里尽量抽出文本：字符串直接用，数组按行拼接，对象找常见文本字段。
@@ -110,7 +112,14 @@ function messageView(message) {
 		.filter(Boolean)
 		.join('\n')
 		.trim();
-	return { role, text, blocks };
+	const view = { role, text, blocks };
+	// 工具结果的归属信息在消息级字段上（content 里只有输出文本），单独带出来供页面展示
+	if (role === 'toolResult') {
+		view.toolCallId = typeof message?.toolCallId === 'string' ? message.toolCallId : '';
+		view.toolName = typeof message?.toolName === 'string' ? message.toolName : '';
+		view.isError = Boolean(message?.isError);
+	}
+	return view;
 }
 
 /**
@@ -157,10 +166,23 @@ function eventFrame(event) {
 	}
 	if (!DEBUG && QUIET_EVENT_TYPES.has(event.type)) return null;
 	if (event.type === 'message_end') return { kind: 'message', message: messageView(event.message) };
+	// 思考等级变更：页面只需其中的 level（顶栏与浮层据此就地更新，不必重放历史）
+	if (event.type === 'thinking_level_changed') {
+		return { kind: 'event', type: event.type, detail: { level: String(event.level ?? '') } };
+	}
 	const detail = {};
-	for (const key of ['toolName', 'name', 'status', 'reason', 'toolCallId']) {
+	for (const key of ['toolName', 'name', 'status', 'reason']) {
 		if (typeof event[key] === 'string') detail[key] = event[key].slice(0, 120);
 	}
+	// 关联 ID 不截短，避免不同调用被合并；参数只供摘要和展开查看，沿用内容块上限。
+	if (typeof event.toolCallId === 'string') detail.toolCallId = event.toolCallId;
+	if (event.type === 'tool_execution_start' && event.args !== undefined) {
+		const args = typeof event.args === 'string' ? event.args : JSON.stringify(event.args);
+		if (typeof args === 'string') {
+			detail.arguments = args.length > MAX_BLOCK_TEXT ? `${args.slice(0, MAX_BLOCK_TEXT)}\n…（参数已截断）` : args;
+		}
+	}
+	if (event.type === 'tool_execution_end' && typeof event.isError === 'boolean') detail.isError = event.isError;
 	return { kind: 'event', type: event.type, detail };
 }
 
@@ -214,6 +236,11 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		}
 	}
 
+	/** 当前模型支持的思考等级（老版本 SDK 没有该方法时返回空数组，不影响其它路由）。 */
+	function availableThinkingLevels(session) {
+		return typeof session?.getAvailableThinkingLevels === 'function' ? session.getAvailableThinkingLevels() : [];
+	}
+
 	/** 当前会话的可公开信息。 */
 	function sessionInfo() {
 		const session = active?.session;
@@ -223,10 +250,58 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			sessionId: session?.sessionId ?? null,
 			sessionFile: session?.sessionFile ?? null,
 			model: model?.provider && model?.id ? `${model.provider}/${model.id}` : null,
+			modelName: model?.name ?? null,
+			modelReasoning: Boolean(model?.reasoning),
+			contextWindow: model?.contextWindow ?? null,
 			thinkingLevel: session?.thinkingLevel ?? null,
+			thinkingLevels: availableThinkingLevels(session),
 			busy,
 			pid: process.pid,
 		};
+	}
+
+	/** 广播当前会话上下文（boot、切模型、切思考等级之后都要刷新页面顶栏）。 */
+	function broadcastSession(extra = {}) {
+		broadcast({ kind: 'session', info: { ...sessionInfo(), ...extra } });
+	}
+
+	/** 判断两个模型是否是同一个（provider + id）。 */
+	function sameModel(a, b) {
+		return Boolean(a && b && a.provider === b.provider && a.id === b.id);
+	}
+
+	/** 可用模型的裁剪视图（去掉 headers / compat 等页面用不到、且不宜外发的字段）。 */
+	function modelView(model) {
+		return {
+			provider: model.provider,
+			id: model.id,
+			name: model.name || model.id,
+			reasoning: Boolean(model.reasoning),
+			contextWindow: model.contextWindow ?? 0,
+			input: Array.isArray(model.input) ? model.input : [],
+		};
+	}
+
+	/** 已配鉴权的可用模型列表（当前模型置顶，其余按 provider / id 排序）。 */
+	function availableModels() {
+		const current = active?.session?.model;
+		const models = (active?.session?.modelRuntime?.getAvailableSnapshot() ?? []).map(modelView);
+		models.sort((a, b) => {
+			const aCurrent = sameModel(a, current);
+			const bCurrent = sameModel(b, current);
+			if (aCurrent !== bCurrent) return aCurrent ? -1 : 1;
+			if (a.provider !== b.provider) return a.provider.localeCompare(b.provider);
+			return a.id.localeCompare(b.id);
+		});
+		return models;
+	}
+
+	/** 全局默认模型（settings 里的 provider / id），没设置则返回 null。 */
+	function defaultModel() {
+		const settings = active?.session?.settingsManager;
+		const provider = settings?.getDefaultProvider?.();
+		const id = settings?.getDefaultModel?.();
+		return provider && id ? { provider, id } : null;
 	}
 
 	/**
@@ -250,10 +325,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		});
 		active = { session, unsubscribe };
 		busy = false;
-		broadcast({
-			kind: 'session',
-			info: { ...sessionInfo(), modelFallbackMessage: modelFallbackMessage || undefined },
-		});
+		broadcastSession({ modelFallbackMessage: modelFallbackMessage || undefined });
 		// 新建 / 切换会话后要让页面立即重放历史（history 帧平时只在 SSE 建连时发一次）
 		for (const frame of historyFrames(session.state?.messages ?? [])) broadcast(frame);
 		return active;
@@ -306,6 +378,23 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			if (route === 'GET /api/messages') {
 				const messages = (active?.session?.state?.messages ?? []).map(messageView);
 				return send(res, 200, { messages, context: sessionInfo() }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'GET /api/models') {
+				if (!active) await boot();
+				const current = active.session.model;
+				return send(
+					res,
+					200,
+					{
+						current: current ? { provider: current.provider, id: current.id } : null,
+						default: defaultModel(),
+						models: availableModels(),
+						thinkingLevel: active.session.thinkingLevel ?? null,
+						thinkingLevels: availableThinkingLevels(active.session),
+					},
+					{ 'content-type': 'application/json' },
+				);
 			}
 
 			if (route === 'GET /api/sessions') {
@@ -370,6 +459,60 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				if (!active) await boot();
 				await active.session.steer(text);
 				return send(res, 202, { accepted: true }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'POST /api/model') {
+				const body = await readJson(req);
+				const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
+				const modelId = typeof body?.id === 'string' ? body.id.trim() : '';
+				if (!provider || !modelId) {
+					return send(res, 400, { error: '缺少 provider 或 id' }, { 'content-type': 'application/json' });
+				}
+				if (!active) await boot();
+				// 只允许切到本机已配鉴权的模型，避免把任意 provider/id 直接塞进会话
+				const target = (active.session.modelRuntime?.getAvailableSnapshot() ?? []).find((model) =>
+					sameModel(model, { provider, id: modelId }),
+				);
+				if (!target) {
+					const error = `模型不在可用列表中：${provider}/${modelId}`;
+					return send(res, 404, { error }, { 'content-type': 'application/json' });
+				}
+				const persist = Boolean(body?.persist);
+				try {
+					// 默认只改当前会话；persist 才写全局默认模型
+					await active.session.setModel(target, { persist });
+				} catch (err) {
+					return send(
+						res,
+						400,
+						{ error: String(err?.message ?? err) },
+						{ 'content-type': 'application/json' },
+					);
+				}
+				broadcastSession();
+				return send(res, 200, { context: sessionInfo(), persist }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'POST /api/thinking') {
+				const body = await readJson(req);
+				const level = typeof body?.level === 'string' ? body.level.trim() : '';
+				if (!THINKING_LEVELS.includes(level)) {
+					const error = `不支持的思考等级：${level || '(空)'}`;
+					return send(res, 400, { error }, { 'content-type': 'application/json' });
+				}
+				if (!active) await boot();
+				if (typeof active.session.setThinkingLevel !== 'function') {
+					return send(
+						res,
+						400,
+						{ error: '当前 pi 版本不支持思考等级切换' },
+						{ 'content-type': 'application/json' },
+					);
+				}
+				// setThinkingLevel 会按当前模型能力收敛；只改本会话，不写全局默认
+				active.session.setThinkingLevel(level);
+				broadcastSession();
+				return send(res, 200, { context: sessionInfo() }, { 'content-type': 'application/json' });
 			}
 
 			if (route === 'POST /api/abort') {
