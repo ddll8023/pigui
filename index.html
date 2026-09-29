@@ -843,7 +843,7 @@
 				</div>
 				<textarea id="input" rows="1" aria-label="输入消息" placeholder="输入消息…（打一个 / 查看命令）"></textarea>
 				<button id="send">发送</button>
-				<div class="hint">Enter 发送 · Shift+Enter 换行 · /model 模型 · /resume 会话 · /new 新建</div>
+				<div class="hint">Enter 发送 · Shift+Enter 换行 · /model 模型 · /resume 会话 · /new 新建 · /rewind 回退</div>
 			</div>
 		</footer>
 
@@ -874,6 +874,17 @@
 			</div>
 		</div>
 
+		<div class="overlay" id="rewindOverlay" hidden>
+			<div class="picker" role="dialog" aria-label="回退">
+				<div class="picker-head">
+					<span class="picker-title">回退到某条提问之前</span>
+					<span class="picker-key">↑↓ 选择 · Enter 回退 · Esc 关闭</span>
+				</div>
+				<ul class="picker-list" id="rewindList"></ul>
+				<div class="picker-foot">被放弃的分支仍保留在会话文件里；已经改动过的文件不会回滚</div>
+			</div>
+		</div>
+
 		<div class="overlay" id="modelOverlay" hidden>
 			<div class="picker" role="dialog" aria-label="切换模型">
 				<div class="picker-head">
@@ -897,7 +908,7 @@
 		<script>
 			/* pigui 前端脚本：只负责渲染服务端推来的帧，不含任何业务判断。
 			   服务端接口：GET /api/context · GET /api/models · POST /api/prompt · POST /api/model · POST /api/thinking
-			              POST /api/abort · POST /api/new · SSE /api/events
+			              POST /api/abort · POST /api/new · POST /api/rewind · SSE /api/events
 			   帧类型：history / session / delta / thinking / message / event / error */
 
 			const messagesEl = document.getElementById('messages');
@@ -917,6 +928,8 @@
 			const jumpBottomEl = document.getElementById('jumpBottom');
 			const navOverlayEl = document.getElementById('navOverlay');
 			const navListEl = document.getElementById('navList');
+			const rewindOverlayEl = document.getElementById('rewindOverlay');
+			const rewindListEl = document.getElementById('rewindList');
 			const modelOverlayEl = document.getElementById('modelOverlay');
 			const modelSearchEl = document.getElementById('modelSearch');
 			const thinkBarEl = document.getElementById('thinkBar');
@@ -938,6 +951,8 @@
 			};
 			/** 本地已画出的用户消息文本，用于跳过服务端回显造成的重复。 */
 			let lastLocalUserText = null;
+			/** 本地已画出的用户行，服务端回显时把 entryId 补到它上面。 */
+			let lastLocalUserRow = null;
 			/** 当前会话文件路径（用于在选择器里标记当前项）。 */
 			let currentSessionPath = '';
 			/** 会话选择器（/resume）状态。 */
@@ -949,6 +964,7 @@
 				{ name: '/resume', desc: '切换会话' },
 				{ name: '/model', desc: '切换模型 / 思考等级' },
 				{ name: '/new', desc: '新建会话' },
+				{ name: '/rewind', desc: '回退到某条提问之前' },
 			];
 			/** 已渲染出来的历史行数（判断是否需要空态提示）。 */
 			let historyRows = 0;
@@ -956,6 +972,10 @@
 			let navOpen = false;
 			let navItems = [];
 			let navIndex = 0;
+			/** 回退浮层（/rewind）状态。 */
+			let rewindOpen = false;
+			let rewindItems = [];
+			let rewindIndex = 0;
 			/** 滚动节流的 rAF 句柄。 */
 			let jumpFrame = 0;
 			/** 命令提示条状态。 */
@@ -1014,10 +1034,11 @@
 				return { row, body };
 			}
 
-			/** 生成一条正式消息行（占用序号）。 */
-			function createMessageRow(kind, label) {
+			/** 生成一条正式消息行（占用序号）；entryId 用于回退时定位会话树节点。 */
+			function createMessageRow(kind, label, entryId) {
 				seq += 1;
 				const { row, body } = createRow(kind, label, { index: seq });
+				if (entryId) row.dataset.entryId = entryId;
 				appendRow(row);
 				return { row, body };
 			}
@@ -1031,13 +1052,14 @@
 				pendingAssistant = null;
 				toolRecords.clear();
 				lastLocalUserText = null;
+				lastLocalUserRow = null;
 				historyRows = 0;
 				showEmptyHint();
 			}
 
-			/** 空会话时给一句引导，避免出现纯白页面。 */
+			/** 空会话时给一句引导，避免出现纯白页面；已经存在提示时不重复添加。 */
 			function showEmptyHint() {
-				if (messagesEl.querySelector('.row')) return;
+				if (messagesEl.querySelector('.row') || messagesEl.querySelector('.empty')) return;
 				const node = document.createElement('div');
 				node.className = 'empty';
 				node.textContent = '在下面输入第一条消息，pi 会在当前工作目录开始工作。';
@@ -1672,7 +1694,7 @@
 					addBlock(body, { type: 'text', text: message.text || '' });
 					return null;
 				}
-				const { row, body } = createMessageRow(kind, label);
+				const { row, body } = createMessageRow(kind, label, message.entryId);
 				if (blocks.length) for (const block of blocks) addBlock(body, block);
 				else if (message.text) addBlock(body, { type: 'text', text: message.text });
 				return row;
@@ -1681,9 +1703,10 @@
 			/** 本地立即显示用户消息；记录正文用于跳过服务端回显。 */
 			function addUserMessage(text) {
 				const pinned = pinnedToBottom();
-				const { body } = createMessageRow('user', 'YOU');
+				const { row, body } = createMessageRow('user', 'YOU');
 				addBlock(body, { type: 'text', text });
 				lastLocalUserText = text;
+				lastLocalUserRow = row;
 				if (pinned) messagesEl.scrollTop = messagesEl.scrollHeight;
 				syncJumpButtons();
 			}
@@ -2159,12 +2182,13 @@
 				const space = text.indexOf(' ');
 				const head = space > 0 ? text.slice(0, space) : text;
 				const rest = space > 0 ? text.slice(space + 1).trim() : '';
-				if (head !== '/resume' && head !== '/model' && head !== '/new') return false;
+				if (head !== '/resume' && head !== '/model' && head !== '/new' && head !== '/rewind') return false;
 				hideCommands();
 				inputEl.value = '';
 				autoGrow();
 				if (head === '/resume') await openSessionPicker();
 				else if (head === '/model') await openModelPicker(rest);
+				else if (head === '/rewind') await openRewind();
 				else await newSession();
 				return true;
 			}
@@ -2255,6 +2279,102 @@
 				setTimeout(() => row.classList.remove('flash'), 1600);
 			}
 
+			/** 收集可回退的用户提问：只取有会话条目 id 的行；本地回显尚未拿到 id、或旧版本 SDK 不给 id 时不参与。 */
+			function collectRewindItems() {
+				return [...messagesEl.querySelectorAll('.row.user[data-entry-id]')].map((row) => ({
+					row,
+					entryId: row.dataset.entryId,
+					idx: row.querySelector('.idx') ? row.querySelector('.idx').textContent : '',
+					text:
+						String(row.querySelector('.body') ? row.querySelector('.body').textContent : '')
+							.replace(/\s+/g, ' ')
+							.trim()
+							.slice(0, 90) || '(空)',
+				}));
+			}
+
+			/** 渲染回退列表。 */
+			function renderRewind(message) {
+				rewindListEl.replaceChildren();
+				const plain = (text) => {
+					const item = document.createElement('li');
+					item.className = 'picker-item plain';
+					item.textContent = text;
+					rewindListEl.append(item);
+				};
+				if (message) return plain(message);
+				if (!rewindItems.length) return plain('这个会话还没有可以回退的提问');
+				rewindItems.forEach((item, index) => {
+					const li = document.createElement('li');
+					li.className = 'picker-item';
+					li.dataset.active = String(index === rewindIndex);
+					const mark = document.createElement('span');
+					mark.className = 'mark';
+					mark.textContent = item.idx;
+					const text = document.createElement('span');
+					text.className = 'text';
+					text.textContent = item.text;
+					li.append(mark, text);
+					li.addEventListener('click', () => void confirmRewind(item));
+					rewindListEl.append(li);
+				});
+				const active = rewindListEl.children[rewindIndex];
+				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+			}
+
+			/** 打开回退浮层（/rewind 触发）；默认高亮最近一条提问，回合运行中不允许回退。 */
+			function openRewind() {
+				if (stateEl.dataset.busy === 'true') {
+					addStatusRow('回合运行中，先点「中止」再回退', 'error');
+					return;
+				}
+				rewindItems = collectRewindItems();
+				rewindIndex = rewindItems.length ? rewindItems.length - 1 : 0;
+				rewindOpen = true;
+				rewindOverlayEl.hidden = false;
+				renderRewind();
+			}
+
+			/** 关闭回退浮层，把焦点还给输入框。 */
+			function closeRewind() {
+				if (!rewindOpen) return;
+				rewindOpen = false;
+				rewindOverlayEl.hidden = true;
+				inputEl.focus();
+			}
+
+			/** 上下键移动回退高亮。 */
+			function moveRewind(delta) {
+				if (!rewindItems.length) return;
+				rewindIndex = (rewindIndex + delta + rewindItems.length) % rewindItems.length;
+				renderRewind();
+			}
+
+			/** 执行回退：服务端移动会话叶子并广播历史，原提问文本回到输入框供编辑重发。 */
+			async function confirmRewind(item) {
+				if (!item || !item.entryId) return;
+				try {
+					const response = await fetch('/api/rewind', {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify({ entryId: item.entryId }),
+					});
+					const data = await response.json().catch(() => ({}));
+					if (!response.ok) {
+						addStatusRow('回退失败：' + (data.error || 'HTTP ' + response.status), 'error');
+						return;
+					}
+					closeRewind();
+					inputEl.value = String(data.editorText || '');
+					autoGrow();
+					inputEl.focus();
+					inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+					addStatusRow('已回退到该提问之前，原消息已放回输入框');
+				} catch (err) {
+					addStatusRow('回退失败：' + String((err && err.message) || err), 'error');
+				}
+			}
+
 			/** 根据滚动位置显隐跳转按钮。 */
 			function syncJumpButtons() {
 				const top = messagesEl.scrollTop;
@@ -2338,7 +2458,10 @@
 							return;
 						}
 						if (message.role === 'user' && lastLocalUserText !== null && String(message.text || '').trim() === lastLocalUserText.trim()) {
+							// 本地已经画过这条消息，只把服务端给的 entryId 补到那一行，不重复渲染
+							if (lastLocalUserRow && message.entryId) lastLocalUserRow.dataset.entryId = message.entryId;
 							lastLocalUserText = null;
+							lastLocalUserRow = null;
 							return;
 						}
 						renderMessage(message);
@@ -2469,6 +2592,26 @@
 					}
 					return;
 				}
+				// 回退浮层打开时，键盘先服务于回退
+				if (rewindOpen) {
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						closeRewind();
+						return;
+					}
+					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+						event.preventDefault();
+						moveRewind(event.key === 'ArrowDown' ? 1 : -1);
+						return;
+					}
+					if (event.key === 'Enter') {
+						event.preventDefault();
+						const item = rewindItems[rewindIndex];
+						if (item) void confirmRewind(item);
+						return;
+					}
+					return;
+				}
 				// 消息目录打开时，键盘先服务于目录
 				if (navOpen) {
 					if (event.key === 'Escape') {
@@ -2569,6 +2712,12 @@
 			});
 			document.addEventListener('keydown', (event) => {
 				if (event.key === 'Escape' && navOpen) closeNav();
+			});
+			rewindOverlayEl.addEventListener('click', (event) => {
+				if (event.target === rewindOverlayEl) closeRewind();
+			});
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape' && rewindOpen) closeRewind();
 			});
 			jumpTopEl.addEventListener('click', () => messagesEl.scrollTo({ top: 0, behavior: 'smooth' }));
 			jumpBottomEl.addEventListener('click', () =>

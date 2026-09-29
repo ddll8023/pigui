@@ -52,6 +52,7 @@ pigui
 | `/resume` | 打开会话选择器：`↑`/`↓` 移动、`Enter` 切换、`Esc` 关闭，也可以直接点条目 |
 | `/model` | 打开模型浮层：搜索并切换模型、调整思考等级（详见下节）；也可以写 `/model claude` 把搜索词预填进去 |
 | `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
+| `/rewind` | 打开回退浮层：列出本会话的每条提问，`↑`/`↓` 移动、`Enter` 回退、`Esc` 关闭，也可以直接点条目（详见下节） |
 
 打一个 `/` 就会出现命令提示条：`↑`/`↓` 移动、`Enter` 或 `Tab` 直接执行，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`）。输入框失焦或不再以 `/` 开头时提示自动收起。
 
@@ -81,6 +82,17 @@ pigui
 
 - 顶栏「目录」按钮：列出本会话的**每条用户提问**（序号 + 首段摘要），`↑`/`↓` 选择、`Enter` 跳转、`Esc` 关闭，也可直接点；跳到的行会闪一下高亮。
 - 消息区右侧的两个圆形按钮：往上滚离开底部时出现「↓ 最新」，往下滚离开顶部时出现「↑ 顶部」，点击平滑滚动过去。
+
+## 回退
+
+在输入框执行 `/rewind` 打开回退浮层：`↑`/`↓` 选择、`Enter` 回退、`Esc` 关闭，也可以直接点条目；默认高亮最近一条提问。未获取到会话条目 id 的提问（本地刚发出、服务端尚未回显）不进列表。
+
+- 回退到某条提问**之前**：会话叶子移回该提问的父节点，这条提问的原文回到输入框，改完再发即形成新分支（等价于 pi 的 `/tree` 选中用户消息）。
+- **旧分支不删**：它仍完整留在会话 JSONL 里，只是不再参与之后的上下文；回退不做二次确认，也不调模型总结（`summarize: false`，无额外耗时与费用）。
+- **不回滚文件改动**：agent 之前改过的文件保持原样，回退只影响会话上下文。
+- 回合运行中不能回退（先点“中止”）；含图片的用户消息回退后只把文本放回输入框（本页也不支持发送图片）。
+- 回退会移动共享会话文件里的叶子指针，执行前确认这个会话没有在 Orca / pi 里同时打开（见“会话目录与并发注意”）。
+- 需要 pi SDK 提供 `navigateTree`；更老的版本会提示“当前 pi 版本不支持会话回退”。
 
 ## 正文渲染
 
@@ -140,13 +152,14 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
 | POST | `/api/new` | 新建会话（旧的会被释放） |
 | POST | `/api/switch` | `{sessionFile}`；切换到该目录下的某个会话（不属于该目录则 404） |
+| POST | `/api/rewind` | `{entryId}`；回退到该用户消息节点之前（只接受本会话的用户提问，否则 404；运行中 409；被扩展取消也 409），被放弃的分支既不删除也不总结；成功返回 `{editorText, context}` |
 | POST | `/api/shutdown` | 关闭服务 |
 
 SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy；切换模型与思考等级后也会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`message`（完成的消息）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）。
 
-**消息结构**：`{ role, text, blocks }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）；`text` 是全部块拼成的纯文本，供简单渲染使用。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
+**消息结构**：`{ role, text, blocks, entryId }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）；`text` 是全部块拼成的纯文本，供简单渲染使用。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
 
 默认不转发 `tool_execution_update`、`message_start`、`turn_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
 

@@ -63,8 +63,9 @@ function textOfValue(value, depth = 0) {
  *
  * blocks 保留每块的类型（thinking / text / toolCall / toolResult / …）与 toolCallId，
  * 页面据此可以分区渲染、把工具输出折到对应调用下面；text 是拼好的纯文本，供简单渲染使用。
+ * entryId 是这条消息在会话树里所属条目的 id（页面回退时用），取不到时为空串。
  */
-function messageView(message) {
+function messageView(message, entryId = '') {
 	const role = typeof message?.role === 'string' ? message.role : 'unknown';
 	const blocks = [];
 	if (typeof message?.content === 'string') {
@@ -112,7 +113,8 @@ function messageView(message) {
 		.filter(Boolean)
 		.join('\n')
 		.trim();
-	const view = { role, text, blocks };
+	// entryId 是会话树里这条消息所在条目的 id，页面据此定位回退目标；取不到时为空串
+	const view = { role, text, blocks, entryId };
 	// 工具结果的归属信息在消息级字段上（content 里只有输出文本），单独带出来供页面展示
 	if (role === 'toolResult') {
 		view.toolCallId = typeof message?.toolCallId === 'string' ? message.toolCallId : '';
@@ -128,8 +130,7 @@ function messageView(message) {
  * 页面按 part 顺序拼接（part 为 0 时清空重绘），这样几 MB 的长会话也能完整送达，
  * 不会被 MAX_FRAME_BYTES 整体丢弃成 frame_truncated。
  */
-function historyFrames(messages) {
-	const views = messages.map(messageView);
+function historyFrames(views) {
 	const batches = [];
 	let batch = [];
 	let size = 0;
@@ -204,6 +205,28 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 	let active = null;
 	/** 是否正在跑回合（决定新消息走 prompt 还是 steer）。 */
 	let busy = false;
+
+	/** 当前上下文路径上的消息视图（带 entryId），回退与历史下发共用同一份顺序。 */
+	function currentViews() {
+		const session = active?.session;
+		const manager = session?.sessionManager;
+		// projection 就是 agent.state.messages 的来源，按它配对才能拿到条目 id
+		if (typeof manager?.buildSessionProjection === 'function') {
+			const views = [];
+			for (const entry of manager.buildSessionProjection()?.entries ?? []) {
+				const entryId = entry?.sourceEntry?.id ?? '';
+				for (const message of entry?.messages ?? []) views.push(messageView(message, entryId));
+			}
+			return views;
+		}
+		// 老版本 SDK 没有 projection：仍然下发历史，只是没有 entryId（页面据此禁用回退）
+		return (session?.state?.messages ?? []).map((message) => messageView(message));
+	}
+
+	/** 广播当前上下文路径的完整历史（建连、新建/切换会话、回退之后都要让页面重放）。 */
+	function broadcastHistory() {
+		for (const frame of historyFrames(currentViews())) broadcast(frame);
+	}
 
 	/** 按参数决定会话管理器。 */
 	function currentSessionManager() {
@@ -327,7 +350,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		busy = false;
 		broadcastSession({ modelFallbackMessage: modelFallbackMessage || undefined });
 		// 新建 / 切换会话后要让页面立即重放历史（history 帧平时只在 SSE 建连时发一次）
-		for (const frame of historyFrames(session.state?.messages ?? [])) broadcast(frame);
+		broadcastHistory();
 		return active;
 	}
 
@@ -376,7 +399,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			}
 
 			if (route === 'GET /api/messages') {
-				const messages = (active?.session?.state?.messages ?? []).map(messageView);
+				const messages = currentViews();
 				return send(res, 200, { messages, context: sessionInfo() }, { 'content-type': 'application/json' });
 			}
 
@@ -411,7 +434,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				});
 				clients.add(res);
 				res.write(`data: ${JSON.stringify({ kind: 'session', info: sessionInfo() })}\n\n`);
-				for (const frame of historyFrames(active?.session?.state?.messages ?? [])) {
+				for (const frame of historyFrames(currentViews())) {
 					res.write(`data: ${JSON.stringify(frame)}\n\n`);
 				}
 				const keepAlive = setInterval(() => {
@@ -518,6 +541,42 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			if (route === 'POST /api/abort') {
 				if (active) await active.session.abort();
 				return send(res, 202, { aborted: true }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'POST /api/rewind') {
+				const body = await readJson(req);
+				const entryId = typeof body?.entryId === 'string' ? body.entryId.trim() : '';
+				if (!entryId) return send(res, 400, { error: '缺少 entryId' }, { 'content-type': 'application/json' });
+				if (!active) return send(res, 400, { error: '会话尚未就绪' }, { 'content-type': 'application/json' });
+				if (typeof active.session.navigateTree !== 'function') {
+					return send(res, 400, { error: '当前 pi 版本不支持会话回退' }, { 'content-type': 'application/json' });
+				}
+				// 只接受本会话的用户提问：其它节点或别处会话的 id 一律拒绝
+				const entry = active.session.sessionManager?.getEntry?.(entryId);
+				if (!entry || entry.type !== 'message' || entry.message?.role !== 'user') {
+					return send(res, 404, { error: '只能回退到本会话的用户提问' }, { 'content-type': 'application/json' });
+				}
+				if (busy || active.session.isStreaming) {
+					return send(res, 409, { error: '回合运行中，请先中止再回退' }, { 'content-type': 'application/json' });
+				}
+				// summarize: false —— 被放弃的分支只移出上下文，既不删除也不总结
+				const result = await active.session.navigateTree(entryId, { summarize: false });
+				if (result?.cancelled) {
+					return send(
+						res,
+						409,
+						{ error: '回退被取消（可能被扩展拦截）' },
+						{ 'content-type': 'application/json' },
+					);
+				}
+				broadcastSession();
+				broadcastHistory();
+				return send(
+					res,
+					200,
+					{ editorText: typeof result?.editorText === 'string' ? result.editorText : '', context: sessionInfo() },
+					{ 'content-type': 'application/json' },
+				);
 			}
 
 			if (route === 'POST /api/new') {
