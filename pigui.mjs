@@ -29,11 +29,12 @@ const PACKAGE_SEGMENTS = ['@earendil-works', 'pi-coding-agent'];
 
 /** 解析命令行参数。 */
 function parseArgs(argv) {
-	const options = { noOpen: false, port: 0, mode: 'continue', sessionPath: '', help: false };
+	const options = { noOpen: false, port: 0, mode: 'new', sessionPath: '', help: false };
 	for (let index = 0; index < argv.length; index += 1) {
 		const arg = argv[index];
 		if (arg === '--no-open') options.noOpen = true;
 		else if (arg === '--new') options.mode = 'new';
+		else if (arg === '--continue') options.mode = 'continue';
 		else if (arg === '--port') options.port = Number(argv[++index] ?? 0) || 0;
 		else if (arg === '--session') options.sessionPath = path.resolve(argv[++index] ?? '');
 		else if (arg === '-h' || arg === '--help') options.help = true;
@@ -51,8 +52,9 @@ function printHelp() {
 选项：
   --no-open          只起服务，不调用 orca 打开页签（会打印地址）
   --port <n>         指定端口（默认由系统自动分配）
-  --new              新建会话（默认恢复该目录最近一次会话）
-  --session <path>   打开指定的会话文件
+  --new              新建会话（默认行为）
+  --continue         恢复该目录最近一次会话（可能正被 Orca / pi 使用，慎用）
+  --session <path>   打开指定的会话文件（优先于 --new / --continue）
   -h, --help         显示本帮助
 
 环境变量：

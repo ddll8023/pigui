@@ -41,7 +41,8 @@ function textOfValue(value, depth = 0) {
 			.join('\n');
 	}
 	if (typeof value === 'object') {
-		for (const key of ['text', 'content', 'output', 'result']) {
+		// 注意：pi 的 thinking 块把正文放在 thinking 字段（thinkingSignature 是签名数据，不是文本，不能取）。
+		for (const key of ['text', 'content', 'output', 'result', 'thinking']) {
 			if (key in value) {
 				const inner = textOfValue(value[key], depth + 1);
 				if (inner) return inner;
@@ -71,7 +72,11 @@ function messageView(message) {
 			if (!raw || typeof raw !== 'object') continue;
 			const type = typeof raw.type === 'string' ? raw.type : 'other';
 			const block = { type, text: textOfValue(raw) };
-			if (type === 'toolCall' || raw.arguments) block.arguments = textOfValue(raw.arguments);
+			if (raw.arguments !== undefined && raw.arguments !== null) {
+				// 工具参数通常是对象（如 { command: "ls" }），转成 JSON 展示；字符串原样使用。
+				block.arguments =
+					typeof raw.arguments === 'string' ? raw.arguments : JSON.stringify(raw.arguments, null, 2);
+			}
 			for (const key of ['toolCallId', 'id']) {
 				if (typeof raw[key] === 'string' && raw[key]) {
 					block.toolCallId = raw[key];
@@ -128,7 +133,7 @@ function eventFrame(event) {
  * @param {number} [options.port]       监听端口，0 表示由系统分配
  * @param {(text: string) => void} [options.onLog] 日志回调
  */
-export async function startServer({ sdk, cwd, mode = 'continue', sessionPath = '', port = 0, onLog = () => {} }) {
+export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', port = 0, onLog = () => {} }) {
 	/** 已连接的 SSE 客户端。 */
 	const clients = new Set();
 	/** 当前会话：{ session, unsubscribe }。 */
@@ -206,6 +211,11 @@ export async function startServer({ sdk, cwd, mode = 'continue', sessionPath = '
 		broadcast({
 			kind: 'session',
 			info: { ...sessionInfo(), modelFallbackMessage: modelFallbackMessage || undefined },
+		});
+		// 新建 / 切换会话后要让页面立即重放历史（history 帧平时只在 SSE 建连时发一次）
+		broadcast({
+			kind: 'history',
+			messages: (session.state?.messages ?? []).map(messageView),
 		});
 		return active;
 	}
@@ -329,6 +339,23 @@ export async function startServer({ sdk, cwd, mode = 'continue', sessionPath = '
 			}
 
 			if (route === 'POST /api/new') {
+				sessionPath = ''; // 清掉显式会话，否则新建时会一直打开它
+				mode = 'new';
+				await boot();
+				return send(res, 202, { context: sessionInfo() }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'POST /api/switch') {
+				const body = await readJson(req);
+				const wanted = typeof body?.sessionFile === 'string' ? body.sessionFile.trim() : '';
+				if (!wanted) return send(res, 400, { error: '缺少 sessionFile' }, { 'content-type': 'application/json' });
+				// 只允许切到本工作目录名下的会话，避免被当作任意文件读取入口
+				const sessions = await sdk.SessionManager.list(cwd).catch(() => []);
+				const found = sessions.find((info) => path.resolve(info.path) === path.resolve(wanted));
+				if (!found) {
+					return send(res, 404, { error: '该会话不属于当前工作目录' }, { 'content-type': 'application/json' });
+				}
+				sessionPath = path.resolve(found.path);
 				await boot();
 				return send(res, 202, { context: sessionInfo() }, { 'content-type': 'application/json' });
 			}

@@ -25,9 +25,10 @@ pigui
 
 它会：
 
-1. 借用这台电脑已安装的 pi 的 SDK（见下"依赖解析"）；
+1. 借用这台电脑已安装的 pi 的 SDK（见下“依赖解析”）；
 2. 以当前目录为 `cwd` 起一个本地服务（端口由系统自动分配）；
-3. 调 `orca tab create --url http://127.0.0.1:<port>/ --worktree active`，在本 worktree 打开页签。
+3. **新建一个会话**（默认不碰该目录里已有的历史会话）；
+4. 调 `orca tab create --url http://127.0.0.1:<port>/ --worktree active`，在本 worktree 打开页签。
 
 停止：在该终端按 `Ctrl+C`。
 
@@ -37,9 +38,23 @@ pigui
 |---|---|
 | `--no-open` | 只起服务并打印地址，不调 orca 开页签 |
 | `--port <n>` | 指定端口（默认系统自动分配） |
-| `--new` | 新建会话（默认恢复该目录最近一次会话） |
-| `--session <path>` | 打开指定的会话文件 |
+| `--new` | 新建会话（默认行为） |
+| `--continue` | 恢复该目录最近一次会话（可能正被 Orca / pi 使用，慎用） |
+| `--session <path>` | 打开指定的会话文件（优先于 `--new` / `--continue`） |
 | `-h`, `--help` | 显示帮助 |
+
+## 页面内命令
+
+在页面输入框里输入以下命令（回车执行，只在本页处理，**不会发给模型**）：
+
+| 命令 | 作用 |
+|---|---|
+| `/resume` | 打开会话选择器：`↑`/`↓` 移动、`Enter` 切换、`Esc` 关闭，也可以直接点条目 |
+| `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
+
+打一个 `/` 就会出现命令提示条：`↑`/`↓` 移动、`Enter` 或 `Tab` 直接执行，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`）。输入框失焦或不再以 `/` 开头时提示自动收起。
+
+只有完全等于这两个字符串的输入会被当作命令；`/usr/local/bin` 这类以 `/` 开头的普通文本仍会照常发送。
 
 ## 环境变量
 
@@ -71,11 +86,12 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表 |
 | GET | `/api/messages` | 当前会话的消息（`{role, text, blocks}`） |
 | GET | `/api/sessions` | 该目录的会话列表 |
-| GET | `/api/events` | SSE 事件流，连接时先补 `session` 与 `history` 两帧 |
+| GET | `/api/events` | SSE 事件流，连接时先补 `session` 与 `history` 两帧；新建 / 切换会话后也会广播 `session` + `history` |
 | POST | `/api/prompt` | `{message}`；运行中会自动改为 steer |
 | POST | `/api/steer` | `{message}`；强制 steer |
 | POST | `/api/abort` | 中止当前回合 |
 | POST | `/api/new` | 新建会话（旧的会被释放） |
+| POST | `/api/switch` | `{sessionFile}`；切换到该目录下的某个会话（不属于该目录则 404） |
 | POST | `/api/shutdown` | 关闭服务 |
 
 SSE 帧类型：`session`（上下文/模型/busy）、`history`（历史消息）、`delta`（助手文本增量）、`thinking`（思考增量）、`message`（完成的消息）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`）、`error`。
@@ -88,10 +104,14 @@ SSE 帧类型：`session`（上下文/模型/busy）、`history`（历史消息�
 
 会话默认存在 pi 的共享目录 `~/.pi/agent/sessions/--<编码后的 cwd>--/`，与 pi / Orca 是同一份，所以能在页面里续上该目录的历史会话。
 
-**风险**：默认的"恢复最近会话"很可能指向 Orca 里正在使用的那个会话文件。两个进程同时写同一个 JSONL 会互相干扰。建议：
+**默认行为**：`pigui` 每次都会新建会话，不会去碰该目录里已有的历史会话（早先默认的“恢复最近会话”曾撞上 Orca 正在使用的会话文件；两个进程同时写同一个 JSONL 会互相干扰，因此改为默认新建）。
 
-- 想和 Orca 里的对话完全分开：用 `pigui --new`；
-- 想在 pigui 里继续某个历史会话：用 `pigui --session <该会话文件路径>`，并确保它没有在别处同时打开。
+页面里的 `/resume` 走的是同一条路径（切换到列表里的某个会话），选之前同样要确认那个会话没有被别处打开。
+
+需要接续旧会话时：
+
+- 恢复该目录最近写入的会话：`pigui --continue`，使用前确认它没有在 Orca / pi 里同时打开；
+- 打开某个确定的会话文件：`pigui --session <该会话文件路径>`。
 
 ## 卸载
 
