@@ -50,7 +50,7 @@ pigui
 
 | 命令 | 作用 |
 |---|---|
-| `/resume` | 打开会话选择器：`↑`/`↓` 移动、`Enter` 切换、`Esc` 关闭，也可以直接点条目 |
+| `/resume` | 打开会话选择器：`↑`/`↓` 移动、`Enter` 切换、`Esc` 关闭，也可以直接点条目（所有浮层右上角都有 ✕） |
 | `/model` | 打开模型浮层：搜索并切换模型、调整思考等级（详见下节）；也可以写 `/model claude` 把搜索词预填进去 |
 | `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
 | `/rewind` | 打开回退浮层：列出本会话的每条提问，`↑`/`↓` 移动、`Enter` 回退、`Esc` 关闭，也可以直接点条目（详见下节） |
@@ -58,6 +58,33 @@ pigui
 打一个 `/` 就会出现命令提示条：`↑`/`↓` 移动、`Enter` 或 `Tab` 直接执行，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`）。输入框失焦或不再以 `/` 开头时提示自动收起。
 
 只有列在命令表里、且完全匹配（`/model` 带参数时首个词匹配）的输入会被当作命令；`/usr/local/bin` 这类以 `/` 开头的普通文本仍会照常发送。
+
+## @ 引用文件
+
+在输入框打一个 `@`（行首，或空白之后）就会弹出文件提示条，用法与 `/` 命令条一致：`↑`/`↓` 移动、`Enter` 或 `Tab` 选中、`Esc` 关闭，也可以直接用鼠标点；继续输入按子串过滤，提示条失焦或光标前的 `@` 片段结束时自动收起。
+
+- 选中文件：把 `@查询串` 换成**相对路径**加一个空格（`@` 被消耗，与 pi 终端里的 `@` 补全一致）。例如先打 `看看 @App`，选中 `src/App.vue` 后正文变成 `看看 src/App.vue `。页面只写路径、**不读文件内容**，由 pi 自己用 `read` 工具去读。
+- 选中目录：保留 `@` 并插入 `目录/`，可以继续往下钻（如 `@src/` → `@src/core/`）。
+- 路径含空格时插成 `"my file.txt"`。
+- 范围：当前工作目录内的文件，遵守 `.gitignore`（走 `git ls-files`），并跳过 `node_modules` / `.git` / `dist` 等目录；不是 git 仓库或没装 git 时退化为遍历，最多索引 20000 个文件，结果缓存 10 秒。
+- 只在光标前是真的 `@` 片段时触发：`a@b` 这类普通文本、以及已经写完的 `@path ` 都不会弹出提示条。
+
+## 附件上传
+
+除 `@` 路径引用外，页面也支持真正的附件（内容随消息一起发给 pi）：
+
+| 入口 | 说明 |
+|---|---|
+| 输入框右侧的 `＋` 按钮 | 选择一个或多个文件 |
+| 拖拽文件到输入区 | 支持一次拖入多个 |
+| 粘贴图片 | 截图后直接 `Ctrl+V` |
+
+- **图片**（`png` / `jpeg` / `webp` / `gif`）：走 pi 的视觉输入（`session.prompt(text, { images })`），缩放与合法性由 pi 自己处理；单条消息最多 8 张，单张原始大小 ≤ 10MB。输入区显示待发缩略图，发送后消息里也显示图片，历史记录里的图片由 `/api/image` 按需懒加载。
+- **文本**（`text/*` 或常见代码后缀）：内容以围栏代码块**内联进消息正文**（首行是文件名），随消息一起进上下文，因此会占 token；单个附件上限 256KB，超出截断并标注。
+- 其他类型（PDF、二进制、可执行文件等）不支持上传，会提示改用 `@` 引用让 pi 自己读。
+- 附件在页面本地读取后再发给服务端，服务端不提供“按路径读任意文件”的接口。
+- 图片的 blob 缩略图只活在本页；刷新后历史里的图片改从 `/api/image` 取，因此刚发出就刷新、或那条消息已被 `/rewind` 移出上下文时，图片可能显示不出来（消息本身不受影响）。
+- 不含文字的纯图片消息也可以发送。
 
 ## 模型与思考等级
 
@@ -70,7 +97,7 @@ pigui
 | `Enter` | 切换当前会话的模型 |
 | `Ctrl+Enter` | 切换模型并写入**全局默认模型**（相当于 pi 里的“设为默认”） |
 | `←` / `→` 或点击等级胶囊 | 调整当前会话的思考等级，立即生效（非思考模型只显示 `off`） |
-| `Esc` / 点遮罩 | 关闭浮层，焦点回到输入框 |
+| `Esc` / 点遮罩 / 右上角 ✕ | 关闭浮层，焦点回到输入框 |
 
 行为说明：
 
@@ -81,17 +108,17 @@ pigui
 
 ## 跳转与导航
 
-- 顶栏「目录」按钮：列出本会话的**每条用户提问**（序号 + 首段摘要），`↑`/`↓` 选择、`Enter` 跳转、`Esc` 关闭，也可直接点；跳到的行会闪一下高亮。
+- 顶栏「目录」按钮：列出本会话的**每条用户提问**（序号 + 首段摘要），`↑`/`↓` 选择、`Enter` 跳转、`Esc` 关闭，也可直接点；右上角 ✕ 或点遮罩同样关闭；跳到的行会闪一下高亮。
 - 消息区右侧的两个圆形按钮：往上滚离开底部时出现「↓ 最新」，往下滚离开顶部时出现「↑ 顶部」，点击平滑滚动过去。
 
 ## 回退
 
-在输入框执行 `/rewind` 打开回退浮层：`↑`/`↓` 选择、`Enter` 回退、`Esc` 关闭，也可以直接点条目；默认高亮最近一条提问。提问发出后会立即画在页面上，服务端回显时再把会话条目 id 补到那一行（回显比消息写库晚一拍），因此刚发的提问也能进回退列表。
+在输入框执行 `/rewind` 打开回退浮层：`↑`/`↓` 选择、`Enter` 回退、`Esc` 关闭，也可以直接点条目；右上角的 ✕ 与 `Esc` 同义。默认高亮最近一条提问。提问发出后会立即画在页面上，服务端回显时再把会话条目 id 补到那一行（回显比消息写库晚一拍），因此刚发的提问也能进回退列表。
 
 - 回退到某条提问**之前**：会话叶子移回该提问的父节点，这条提问的原文回到输入框，改完再发即形成新分支（等价于 pi 的 `/tree` 选中用户消息）。
 - **旧分支不删**：它仍完整留在会话 JSONL 里，只是不再参与之后的上下文；回退不做二次确认，也不调模型总结（`summarize: false`，无额外耗时与费用）。
 - **不回滚文件改动**：agent 之前改过的文件保持原样，回退只影响会话上下文。
-- 回合运行中不能回退（先点“中止”）；含图片的用户消息回退后只把文本放回输入框（本页也不支持发送图片）。
+- 回合运行中不能回退（先点“中止”）；含图片的用户消息回退后只把文本放回输入框（附件不还原）。
 - 回显靠“待回显本地行”队列配对：文本一致就精确对上，文本被服务端改写过（技能 / 模板展开）时退回按发送顺序配对；多个页签同时往同一个会话发消息时可能错配（那是回显帧本身没有客户端标识），此时只是回退目标不准，不影响消息与历史。
 - 回退会移动共享会话文件里的叶子指针，执行前确认这个会话没有在 Orca / pi 里同时打开（见“会话目录与并发注意”）。
 - 需要 pi SDK 提供 `navigateTree`；更老的版本会提示“当前 pi 版本不支持会话回退”。
@@ -114,16 +141,50 @@ pigui
 - 会话还没落到磁盘（更老的 pi 版本没有 `getSessionFile`）时不写文件，只保留当前页面能看到的实时计时。
 - 回退把旧分支丢在上下文之外，但旧分支的耗时记录仍留在文件里（没有害处，再回退回去仍能看到）。
 
+## 用量与速率
+
+输入区下方那一行（早期版本这里是键盘提示）显示本会话的用量与输出速率：
+
+```
+↑12.3K ↓4.5K R120K W3K $0.031 · 上下文 45.2%/200K · 实 42.1 t/s · 均 18.3 t/s
+```
+
+- `↑` / `↓`：累计输入、输出 tokens；`R` / `W`：缓存读、缓存写 tokens；`$`：累计费用（三位小数）。拆开就叫 `↑1.2K` 这种短格式（`K` / `M` 保留一位小数），数据来自 `session.getSessionStats()`。
+- `上下文 45.2%/200K`：当前上下文占用与窗口大小，来自 `session.getContextUsage()`；占用 ≥ 70% 转为青色、≥ 90% 转为红色；压缩后到下一次模型响应前百分比可能是未知的，显示为 `?`。
+- `实 42.1 t/s`：生成中的**实时速率**——2 秒滑动窗口内的输出 tokens 增速，每 250ms 重算一次（所以停止输出后数字会自己衰减，超过 2 秒没新输出就隐藏）；`均 18.3 t/s` 是**上一次模型调用**的平均速率，等于该次输出 tokens ÷ 实测耗时（与“耗时显示”同一份实测值，口径为 `message_start` → `message_end`）。
+- 数据来源：优先用 provider 回报的 `usage.output`，provider 不报时退化为 SDK 的 `estimateTokens` 估算，因此数字可能有偏差。
+- 费用依赖模型定价表；provider 不报 usage 或模型没定价时相关字段为 0。
+- 老版本 pi SDK 没有统计入口时整行显示`用量 —`，其余功能不受影响。
+- 换会话（含新建）时整行重置；切模型、刷新页面不重置。
+- **这一行可以点**（或聚焦后按 `Enter` / `Space`）打开「用量与额度」浮层（`Esc` / 点遮罩 / 右上角 ✕ 关闭），看本会话明细以及 Codex、OpenCode Go 的额度，详见下节。行尾拿到外部额度后会多一个短摘要（如 `Codex 剩82% · Go 已用12%`），拿不到就不显示。
+
+输入框的键盘约定改为靠 placeholder 与按钮悬停提示：`Enter` 发送、`Shift+Enter` 换行、`/` 命令、`@` 引用文件、图片可拖拽或 `Ctrl+V` 粘贴。
+
+## 外部额度（Codex / OpenCode）
+
+用量行点开的浮层里，除了本会话（pi）的用量与速率，还显示两家的账号额度。两者都是**当前模型之外**的账号级信息，与 pi 的会话统计无关：
+
+| 来源 | 数据 | 凭据 |
+|---|---|---|
+| Codex（ChatGPT 订阅） | 5 小时 / 7 天窗口的**剩余**百分比、重置倒计时、可用 credits、`limit_reached` | pi 凭据里的 `openai-codex`（OAuth，必要时由 pi 自动刷新） |
+| OpenCode Go | 滚动窗口 / 本周 / 本月三个窗口的**已用**百分比与重置时间 | pi 凭据里的 `opencode-go`（API key） |
+
+- 接口：Codex 走 `https://chatgpt.com/backend-api/wham/usage`（带 `ChatGPT-Account-Id`，账号 id 从 access token 的 JWT 里解），OpenCode 走 `https://opencode.ai/zen/go/v1/usage`。两个都是**非公开接口**，可能改版或限流，失效时浮层只显示错误原因。
+- 缓存：服务端 60 秒缓存，页面只在打开浮层与首屏摘要时各拉一次，不后台轮询；浮层里的「刷新」按钮带 `?refresh=1` 强制重取。
+- 降级：没登录对应 provider 时显示「未登录 openai-codex / opencode-go」；请求失败显示「HTTP 4xx」或「请求超时」；拿不到窗口数据时不会把整行弄空（行内摘要直接不显示）。
+- 凭据只用于发这两个请求，服务端不返回、不日志、不落盘任何 token；页面也不显示。
+- Codex 额度只在登录了 `openai-codex` 时有意义，OpenCode Go 只在你订阅了 Go 时有数据；OpenCode 的 credit 余额没有公开接口，本页不做。
+
 ## 插件界面（扩展 `ctx.ui`）
 
 页面会把插件（pi 扩展）通过 `ctx.ui` 发起的交互搬到网页上，插件不再因为“没有终端”而直接走降级分支。会话建立后会调用 `session.bindExtensions({ uiContext, mode: 'rpc' })`。
 
 | 方法 | 页面表现 |
 |---|---|
-| `select` / `confirm` | 浮层列表（`↑↓` 选择 · `Enter` 确认 · `Esc` 取消）；`confirm` 渲染成「确认 / 取消」两项 |
+| `select` / `confirm` | 浮层列表（`↑↓` 选择 · `Enter` 确认 · `Esc` 取消）；`confirm` 渲染成「确认 / 取消」两项。右上角 ✕ 与 `Esc` 同义：按默认值（取消）交回插件 |
 | `input` / `editor` | 单行输入 / 多行编辑（`Ctrl+Enter` 提交 · `Esc` 取消） |
 | `notify` | 消息区状态行（`info` 灰 · `warning` 青 · `error` 红）；1 秒内完全相同的通知只显示第一条 |
-| `setStatus` | 输入区下方状态槽，按 key 覆盖，传 `undefined` 清除 |
+| `setStatus` | 输入区下方状态槽，与用量同一行靠左（用量靠右）；按 key 覆盖，传 `undefined` 清除；key 被 `PIGUI_HIDE_STATUS` 命中时不显示 |
 | `setWidget`（字符串数组） | 输入区上方 / 下方的等宽文本块（由 `placement` 决定） |
 | `setTitle` | 浏览器标签标题（尾随去抖 800ms：动画标题不会每一帧都改标签，静态标题延迟 0.8s 显示） |
 | `setEditorText` / `pasteToEditor` | 写入输入框 |
@@ -169,6 +230,7 @@ pigui
 |---|---|
 | `PIGUI_PI_SDK` | 手动指定 pi 包目录（或 `dist/index.js` 路径） |
 | `PIGUI_PLUGIN_UI` | 设 `0` / `false` / `no` / `off` 等同于 `--no-plugin-ui` |
+| `PIGUI_HIDE_STATUS` | 不转发给页面的插件状态键（逗号分隔，不分大小写），默认 `mcp`（`pi-mcp-adapter` 的常驻状态）；设成空串即全部显示 |
 | `PI_AGENT_DIR` | 覆盖 pi 配置目录，默认 `~/.pi/agent` |
 
 ## 依赖解析
@@ -195,9 +257,12 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | GET | `/api/models` | `{current, default, models, thinkingLevel, thinkingLevels}`；`models` 为本机已配鉴权的可用模型（裁剪后的 `provider/id/name/reasoning/contextWindow/input`，当前模型置顶） |
 | GET | `/api/messages` | 当前会话的消息（`{role, text, blocks, entryId, durationMs?, turnMs?}`） |
 | GET | `/api/sessions` | 该目录的会话列表 |
+| GET | `/api/usage/external` | 外部额度：`?refresh=1` 强制重取（默认 60 秒缓存）；返回 `{fetchedAt, codex, opencode}`，每家为 `{ok:true, windows:[…], credits?, limitReached?, fetchedAt}` 或 `{ok:false, error}`；Codex 窗口是 `remainingPercent`，OpenCode 窗口是 `usedPercent` |
+| GET | `/api/files` | `?q=`；工作目录内的文件与目录候选（`{cwd, files:[{path, dir}]}`，相对路径、最多 50 条，只列路径不读内容） |
+| GET | `/api/image` | `?entry=&index=`；当前会话里某条消息的第 `index` 张图片（原始字节），条目不在当前上下文时 404 |
 | GET | `/api/events` | SSE 事件流，连接时先补 `session` 与 `history` 两帧；新建 / 切换会话后也会广播 `session` + `history` |
-| POST | `/api/prompt` | `{message}`；运行中会自动改为 steer |
-| POST | `/api/steer` | `{message}`；强制 steer |
+| POST | `/api/prompt` | `{message, images?}`；`images` 为 `[{data(base64), mimeType}]`（≤ 8 张、单张 ≤ 10MB、仅 png/jpeg/webp/gif），文本与图片不能同时为空；运行中会自动改为 steer |
+| POST | `/api/steer` | `{message, images?}`；强制 steer，`images` 同上 |
 | POST | `/api/abort` | 中止当前回合 |
 | POST | `/api/model` | `{provider, id, persist?}`；切换模型（默认只改本会话，`persist: true` 同时写全局默认）；不在可用列表内 404，未配鉴权 400 |
 | POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
@@ -207,11 +272,11 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | POST | `/api/ui-response` | `{id, value \| confirmed \| cancelled}`；回答插件对话框（同 pi RPC 协议的三种形态）；id 已结束或不存在时 404 |
 | POST | `/api/shutdown` | 关闭服务 |
 
-SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/正在跑的回合 `turn`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`；切换模型与思考等级后也会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
+SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）。
 
-**消息结构**：`{ role, text, blocks, entryId }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）；`text` 是全部块拼成的纯文本，供简单渲染使用。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标、并把耗时挂回对应行。助手消息可能额外带 `durationMs`（该次模型调用耗时），用户消息可能额外带 `turnMs`（该回合总耗时），都来自旁边的耗时文件（见“耗时显示”）。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
+**消息结构**：`{ role, text, blocks, entryId }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）、`image`（带 `mimeType` 与取图地址 `url`，`url` 为空时页面不渲染该块）；`text` 是全部块拼成的纯文本，供简单渲染使用。图片块**不带** base64 内容：十几 MB 的图片会把单帧撑过上限、导致整帧被丢掉，所以历史里的图片由页面按 `url` 去 `/api/image` 懒加载。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标、并把耗时挂回对应行。助手消息可能额外带 `durationMs`（该次模型调用耗时），用户消息可能额外带 `turnMs`（该回合总耗时），都来自旁边的耗时文件（见“耗时显示”）。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
 
 默认不转发 `tool_execution_update`、`message_start`、`turn_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
 

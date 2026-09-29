@@ -6,7 +6,8 @@
 		<title>pi · pigui</title>
 		<style>
 			/* 【设计说明】紧凑 AI 工作台：用户右置气泡、AI 开放式正文、工具归组执行面板。
-			   —— 阅读区最大 1120px，消息间距 14px、段距 8px，不加大标题与装饰留白；
+			   —— 内容区上限 1440px（--stage-max），左右留白随窗口缩放（--stage-pad），
+			      顶栏、消息区、输入区共用同一条内容宽度；消息间距 14px、段距 8px，不加大标题与装饰留白；
 			   —— 工具调用按 ID 关联输出，连续调用归组，正文和思考仍保持原有顺序；
 			   —— 正红只用于运行、发送、错误与焦点，青色只用于思考与工具；
 			   —— 仅浅色主题、系统字体、无外部视觉资源。 */
@@ -27,6 +28,24 @@
 				--sans: "Segoe UI Variable Text", "Segoe UI", system-ui, "Microsoft YaHei UI", sans-serif;
 				--mono: "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
 				--gutter: 30px;
+				/* 版式宽度：内容上限 + 随窗口缩放的左右留白（输入区与消息区共用，左右边界才能对齐） */
+				--stage-max: 1440px;
+				--stage-pad: clamp(12px, 2.4vw, 32px);
+				--composer-max: calc(var(--stage-max) - 2 * var(--stage-pad));
+				/* 长文本行宽上限：大屏下不让用户提问的气泡一行拉满 */
+				--line-max: 90ch;
+				/* 浮层（纸面）令牌：圆角、极细描边、双层柔影、遮罩、入场动效 */
+				--sheet-radius: 12px;
+				--sheet-line: rgba(43, 54, 62, 0.1);
+				--sheet-shadow: 0 1px 2px rgba(22, 25, 28, 0.06), 0 18px 40px -12px rgba(22, 25, 28, 0.28);
+				--scrim: rgba(22, 25, 28, 0.32);
+				--sheet-enter: 120ms;
+				/* 浮层宽度分档：插件对话框 / 列表类内容 / 多块内容（额度） */
+				--sheet-w: clamp(320px, 92vw, 560px);
+				--sheet-w-list: clamp(320px, 92vw, 640px);
+				--sheet-w-wide: clamp(320px, 94vw, 720px);
+				/* 浮层横向留白：头部、列表、字段、底部统一用这一个值 */
+				--sheet-pad-x: 12px;
 			}
 			* {
 				box-sizing: border-box;
@@ -68,14 +87,20 @@
 
 			/* ---------- 顶栏：品牌 / 上下文 / 运行状态 / 操作 ---------- */
 			.topbar {
+				flex: none;
+				min-height: 54px;
+				padding: 8px 0;
+				background: var(--panel);
+				border-bottom: 1px solid var(--line);
+			}
+			/* 顶栏内容与消息区、输入区共用同一条内容宽度，三者左右边界对齐 */
+			.topbar-inner {
 				display: flex;
 				align-items: center;
 				gap: 12px;
-				flex: none;
-				min-height: 54px;
-				padding: 8px 20px;
-				background: var(--panel);
-				border-bottom: 1px solid var(--line);
+				width: min(100%, var(--stage-max));
+				margin: 0 auto;
+				padding: 0 var(--stage-pad);
 			}
 			.brand {
 				flex: none;
@@ -180,14 +205,14 @@
 				position: relative;
 				flex: 1;
 				min-height: 0;
-				width: min(1120px, 100%);
+				width: min(100%, var(--stage-max));
 				align-self: center;
 				overflow-y: auto;
 				scrollbar-gutter: stable;
 				display: flex;
 				flex-direction: column;
 				gap: 14px;
-				padding: 16px 24px;
+				padding: 16px var(--stage-pad);
 				background: var(--panel);
 				border-inline: 1px solid var(--line);
 			}
@@ -226,7 +251,7 @@
 			}
 			.row.assistant .idx { display: none; }
 			.row.assistant > .body { padding-top: 3px; }
-			.row.user { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; gap: 4px; width: fit-content; max-width: 80%; }
+			.row.user { display: flex; flex-direction: column; align-items: flex-end; align-self: flex-end; gap: 4px; width: fit-content; max-width: min(80%, var(--line-max)); }
 			.row.user .gutter { flex-direction: row; gap: 8px; padding: 0 3px; }
 			.row.user .who { color: var(--text); }
 			.row.user .gutter .dur { color: var(--muted); }
@@ -441,6 +466,17 @@
 				border-radius: 4px;
 			}
 
+			/* 用户消息里的附件图片：限高，避免一张大图把消息区拉得看不到头 */
+			.msg-image {
+				display: block;
+				max-width: 100%;
+				max-height: min(360px, 60vh);
+				object-fit: contain;
+				margin: 0.4em 0 0.2em;
+				border: 1px solid var(--line);
+				border-radius: 4px;
+			}
+
 			/* ---------- 思考块（折叠） ---------- */
 			details.think {
 				margin: 0 0 0.7em;
@@ -533,14 +569,14 @@
 			}
 
 			/* ---------- 输入区 ---------- */
-			#composer { flex: none; padding: 8px 24px 10px; background: var(--bg); border-top: 1px solid var(--line); }
+			#composer { flex: none; padding: 8px var(--stage-pad) 10px; background: var(--bg); border-top: 1px solid var(--line); }
 			.composer-box {
 				position: relative;
 				display: grid;
 				grid-template-columns: minmax(0, 1fr) auto;
 				gap: 6px 10px;
 				align-items: end;
-				max-width: 1072px;
+				max-width: var(--composer-max);
 				margin: 0 auto;
 				padding: 8px 12px;
 				background: var(--panel);
@@ -549,11 +585,118 @@
 				box-shadow: 0 3px 12px #24313a08;
 			}
 			.composer-box:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
-			textarea { grid-area: 1 / 1; resize: none; min-width: 0; min-height: 38px; max-height: 200px; padding: 6px 2px; border: 0; background: transparent; color: inherit; font: 14px/1.6 var(--sans); overflow-y: hidden; }
+			textarea { grid-area: 2 / 1; resize: none; min-width: 0; min-height: 38px; max-height: 200px; padding: 6px 2px; border: 0; background: transparent; color: inherit; font: 14px/1.6 var(--sans); overflow-y: hidden; }
 			textarea::placeholder { color: var(--faint); }
 			textarea:focus { outline: none; }
-			#send { grid-area: 1 / 2; margin-bottom: 2px; }
-			.hint { grid-area: 2 / 1 / auto / -1; font: 10px/1.5 var(--mono); color: var(--muted); }
+			.composer-actions { grid-area: 2 / 2; display: flex; align-items: end; gap: 6px; margin-bottom: 2px; }
+			#attach { padding: 9px 10px; font-size: 14px; line-height: 1; border-color: var(--line-strong); }
+			/* 用量与插件状态共用一行：插件状态靠左，用量靠右 */
+			.composer-meta {
+				grid-area: 3 / 1 / auto / -1;
+				display: flex;
+				align-items: baseline;
+				flex-wrap: wrap;
+				gap: 2px 12px;
+				min-height: 15px;
+			}
+			.usage {
+				flex: 1 1 auto;
+				justify-content: flex-end;
+				display: flex;
+				align-items: baseline;
+				gap: 10px;
+				min-height: 15px;
+				overflow: hidden;
+				white-space: nowrap;
+				font: 10px/1.5 var(--mono);
+				color: var(--muted);
+				cursor: pointer;
+			}
+			.usage:hover { color: var(--text); }
+			.usage:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+			.usage .rate { color: var(--accent); }
+			.usage .warn { color: var(--tool); }
+			.usage .danger { color: var(--accent); }
+			.usage .badge { color: var(--tool); }
+
+			/* ---------- 额度浮层（点开用量行） ---------- */
+			.usage-body {
+				display: flex;
+				flex-direction: column;
+				gap: 12px;
+				max-height: 62vh;
+				overflow-y: auto;
+				padding: 4px var(--sheet-pad-x) 12px;
+			}
+			.usage-section {
+				display: flex;
+				flex-direction: column;
+				gap: 4px;
+			}
+			.usage-section h4 {
+				margin: 0 0 4px;
+				font: 11px/1.5 var(--mono);
+				letter-spacing: 0.04em;
+				color: var(--faint);
+			}
+			.usage-line {
+				font: 12px/1.7 var(--mono);
+				color: var(--text);
+			}
+			.usage-line .name { color: var(--muted); }
+			.usage-note {
+				font: 11px/1.6 var(--mono);
+				color: var(--muted);
+			}
+			.usage-note.error { color: var(--accent); }
+			.usage-note.warn { color: var(--tool); }
+			#usageFoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+			/* ---------- 待发附件（图片缩略图 / 文本文件名） ---------- */
+			.attach-strip {
+				grid-area: 1 / 1 / auto / -1;
+				display: flex;
+				flex-wrap: wrap;
+				gap: 6px;
+				padding-bottom: 4px;
+			}
+			.attach-strip[hidden] {
+				display: none;
+			}
+			.attach-chip {
+				display: flex;
+				align-items: center;
+				gap: 6px;
+				max-width: min(260px, 100%);
+				padding: 3px 4px 3px 6px;
+				background: var(--think-bg);
+				border: 1px solid var(--line);
+				border-radius: 4px;
+			}
+			.attach-thumb {
+				width: 28px;
+				height: 28px;
+				object-fit: cover;
+				border-radius: 3px;
+				border: 1px solid var(--line);
+			}
+			.attach-name {
+				font: 11px/1.4 var(--mono);
+				color: var(--text);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.attach-remove {
+				padding: 2px 5px;
+				font-size: 12px;
+				line-height: 1;
+				color: var(--faint);
+			}
+			.attach-remove:hover {
+				color: var(--accent);
+				background: transparent;
+			}
 
 			/* ---------- 命令提示条（输入 / 时出现） ---------- */
 			.cmdbar {
@@ -596,6 +739,27 @@
 				color: var(--text);
 			}
 			.cmd-item .desc {
+				font: 11.5px/1.6 var(--mono);
+				color: var(--faint);
+			}
+
+			/* ---------- @ 引用文件提示条 ---------- */
+			#filebar {
+				max-height: 264px;
+				overflow-y: auto;
+			}
+			.cmd-item .path {
+				font: 12.5px/1.6 var(--mono);
+				color: var(--text);
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.cmd-item[data-dir="true"] .path {
+				color: var(--accent);
+			}
+			.file-empty {
+				padding: 7px 12px;
 				font: 11.5px/1.6 var(--mono);
 				color: var(--faint);
 			}
@@ -658,8 +822,9 @@
 				display: flex;
 				align-items: flex-start;
 				justify-content: center;
-				padding: 56px 16px 16px;
-				background: rgba(22, 25, 28, 0.26);
+				padding: clamp(24px, 7vh, 56px) var(--stage-pad) 16px;
+				background: var(--scrim);
+				backdrop-filter: blur(2px);
 			}
 			.overlay[hidden] {
 				display: none;
@@ -667,37 +832,91 @@
 			.picker {
 				display: flex;
 				flex-direction: column;
-				width: min(560px, 100%);
+				width: var(--sheet-w);
 				max-height: 68vh;
 				background: var(--panel);
-				border: 1px solid var(--line-strong);
-				border-radius: 6px;
-				box-shadow: 0 18px 40px rgba(22, 25, 28, 0.2);
+				border: 1px solid var(--sheet-line);
+				border-radius: var(--sheet-radius);
+				box-shadow: var(--sheet-shadow);
 				overflow: hidden;
+				animation: sheetIn var(--sheet-enter) ease-out;
+			}
+			/* 容器只为程序性聚焦，不画焦点环；环留给内部真正可操作的控件 */
+			.picker:focus { outline: none; }
+			.picker.w-list { width: var(--sheet-w-list); }
+			.picker.w-wide { width: var(--sheet-w-wide); }
+			@keyframes sheetIn {
+				from { opacity: 0; transform: translateY(6px); }
+				to { opacity: 1; transform: none; }
 			}
 			.picker-head {
 				display: flex;
-				align-items: baseline;
+				align-items: center;
 				justify-content: space-between;
-				gap: 10px;
-				padding: 10px 12px;
+				gap: 12px;
+				padding: 12px var(--sheet-pad-x);
 				border-bottom: 1px solid var(--line);
 			}
+			.picker-head-right {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				min-width: 0;
+			}
 			.picker-title {
-				font: 600 11.5px/1 var(--mono);
-				letter-spacing: 0.12em;
-				text-transform: uppercase;
+				min-width: 0;
+				font: 600 12.5px/1.2 var(--sans);
+				color: var(--text);
 			}
 			.picker-key {
 				font: 11px/1.4 var(--mono);
 				color: var(--faint);
 			}
+			/* 关闭按钮与浮层里的小按钮共用一套 */
+			.picker-close {
+				flex: none;
+				width: 24px;
+				height: 24px;
+				padding: 0;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				border-radius: 8px;
+				color: var(--muted);
+				font: 12px/1 var(--sans);
+			}
+			.picker-close:hover {
+				background: var(--think-bg);
+				color: var(--text);
+			}
+			.sheet-btn {
+				padding: 4px 10px;
+				border: 1px solid var(--line-strong);
+				border-radius: 8px;
+				color: var(--muted);
+				font: 11px/1.4 var(--mono);
+			}
+			.sheet-btn:hover {
+				background: var(--think-bg);
+				color: var(--text);
+			}
+			.sheet-btn:disabled {
+				opacity: 0.55;
+				cursor: default;
+			}
+			/* 窄屏：键位提示让位给关闭按钮 */
+			@media (max-width: 560px) {
+				.picker-key { display: none; }
+			}
+			@media (prefers-reduced-motion: reduce) {
+				.picker { animation: none; }
+			}
 			.picker-search {
 				flex: none;
-				margin: 10px 12px 0;
-				padding: 7px 9px;
+				margin: 12px var(--sheet-pad-x) 0;
+				padding: 8px 10px;
 				border: 1px solid var(--line-strong);
-				border-radius: 4px;
+				border-radius: 8px;
 				background: var(--panel);
 				color: var(--text);
 				font: 13px/1.4 var(--mono);
@@ -713,7 +932,7 @@
 				flex-wrap: wrap;
 				align-items: center;
 				gap: 6px;
-				padding: 10px 12px 0;
+				padding: 12px var(--sheet-pad-x) 0;
 			}
 			.think-bar .think-label {
 				margin-right: 2px;
@@ -723,7 +942,7 @@
 				color: var(--faint);
 			}
 			.think-chip {
-				padding: 3px 8px;
+				padding: 4px 10px;
 				border: 1px solid var(--line-strong);
 				border-radius: 999px;
 				background: var(--panel);
@@ -762,7 +981,7 @@
 			}
 			.picker-item[data-active="true"] {
 				background: var(--think-bg);
-				box-shadow: inset 2px 0 0 var(--accent);
+				box-shadow: inset 3px 0 0 var(--accent);
 			}
 			.picker-item .mark {
 				color: var(--accent);
@@ -798,7 +1017,7 @@
 			/* ---------- 插件对话框与状态（扩展 UI） ---------- */
 			.ui-message {
 				margin: 0;
-				padding: 10px 12px 2px;
+				padding: 12px var(--sheet-pad-x) 4px;
 				font-size: 13px;
 				line-height: 1.6;
 				white-space: pre-wrap;
@@ -809,10 +1028,10 @@
 			}
 			.ui-field {
 				flex: none;
-				margin: 10px 12px;
-				padding: 8px 9px;
+				margin: 12px var(--sheet-pad-x);
+				padding: 8px 10px;
 				border: 1px solid var(--line-strong);
-				border-radius: 4px;
+				border-radius: 8px;
 				background: var(--panel);
 				color: var(--text);
 				font: 13px/1.5 var(--mono);
@@ -823,7 +1042,7 @@
 				border-color: var(--accent);
 			}
 			.plugin-widget {
-				max-width: 1072px;
+				max-width: var(--composer-max);
 				margin: 0 auto 6px;
 				padding: 6px 9px;
 				border: 1px solid var(--line);
@@ -838,15 +1057,20 @@
 				margin-bottom: 0;
 			}
 			.plugin-status {
-				grid-area: 3 / 1 / auto / -1;
+				flex: 0 1 auto;
+				min-width: 0;
 				display: flex;
 				flex-wrap: wrap;
 				gap: 2px 12px;
 				font: 10px/1.5 var(--mono);
 				color: var(--muted);
 			}
+			/* display:flex 会盖掉 UA 的 [hidden]，空状态下要显式关掉 */
+			.plugin-status[hidden] {
+				display: none;
+			}
 			.plugin-status .item {
-				max-width: 42vw;
+				max-width: min(42vw, 320px);
 				overflow: hidden;
 				text-overflow: ellipsis;
 				white-space: nowrap;
@@ -854,15 +1078,15 @@
 
 			/* ---------- 窄屏：收紧外边距，保留全部操作与角色差异 ---------- */
 			@media (max-width: 760px) {
-				.topbar { flex-wrap: wrap; gap: 6px 10px; padding: 8px 12px; }
+				.topbar-inner { flex-wrap: wrap; gap: 6px 10px; }
 				.project { flex-basis: calc(100% - 80px); }
 				.project-path { display: none; }
 				.model-info { flex: 1; max-width: none; min-width: 0; }
 				.topbar-actions button { padding: 6px; font-size: 11px; }
-				main { padding: 12px; border: 0; }
+				main { padding: 12px var(--stage-pad); border: 0; }
 				.row { gap: 0 8px; }
-				.row.user { max-width: 90%; gap: 4px; }
-				#composer { padding: 8px 12px; }
+				.row.user { max-width: min(90%, var(--line-max)); gap: 4px; }
+				#composer { padding: 8px var(--stage-pad) 10px; }
 				.tool-content { padding-left: 12px; }
 				.tool-identity { flex-wrap: wrap; gap: 2px 6px; }
 				.tool-identity .name { max-width: 100%; }
@@ -873,28 +1097,30 @@
 				.gutter { flex-direction: row; padding: 0; gap: 8px; }
 				.row.assistant .who { width: 24px; height: 24px; border-radius: 7px; font-size: 10px; }
 				.row.tool .gutter { padding-top: 0; }
-				.row.user { max-width: 95%; }
+				.row.user { max-width: min(95%, var(--line-max)); }
 				.row.assistant > .body { padding-top: 0; }
-				.hint { font-size: 9px; }
+				.usage { font-size: 9px; }
 			}
 		</style>
 	</head>
 	<body>
 		<header class="topbar">
-			<span class="brand">pi<span>gui</span></span>
-			<div class="project">
-				<span class="meta" id="meta">正在连接…</span>
-				<span class="project-path" id="projectPath"></span>
-			</div>
-			<span class="model-info" id="modelInfo" title="输入 /model 切换模型">模型连接中…</span>
-			<span class="state" id="state" data-busy="false">
-				<span class="dot"></span>
-				<span class="label">空闲</span>
-			</span>
-			<div class="topbar-actions">
-				<button id="nav" title="消息目录（跳到某条消息）">目录</button>
-				<button id="abort" title="中止当前回合">中止</button>
-				<button id="new" title="开始一个新会话">新建会话</button>
+			<div class="topbar-inner">
+				<span class="brand">pi<span>gui</span></span>
+				<div class="project">
+					<span class="meta" id="meta">正在连接…</span>
+					<span class="project-path" id="projectPath"></span>
+				</div>
+				<span class="model-info" id="modelInfo" title="输入 /model 切换模型">模型连接中…</span>
+				<span class="state" id="state" data-busy="false">
+					<span class="dot"></span>
+					<span class="label">空闲</span>
+				</span>
+				<div class="topbar-actions">
+					<button id="nav" title="消息目录（跳到某条消息）">目录</button>
+					<button id="abort" title="中止当前回合">中止</button>
+					<button id="new" title="开始一个新会话">新建会话</button>
+				</div>
 			</div>
 		</header>
 
@@ -906,19 +1132,32 @@
 				<div class="cmdbar" id="cmdbar" hidden>
 					<ul class="cmd-list" id="cmdList"></ul>
 				</div>
-				<textarea id="input" rows="1" aria-label="输入消息" placeholder="输入消息…（打一个 / 查看命令）"></textarea>
-				<button id="send">发送</button>
-				<div class="hint">Enter 发送 · Shift+Enter 换行 · /model 模型 · /resume 会话 · /new 新建 · /rewind 回退</div>
-				<div class="plugin-status" id="pluginStatus" hidden></div>
+				<div class="cmdbar" id="filebar" hidden>
+					<ul class="cmd-list" id="fileList"></ul>
+				</div>
+				<div class="attach-strip" id="attachStrip" hidden></div>
+				<textarea id="input" rows="1" aria-label="输入消息" placeholder="输入消息…（/ 命令 · @ 引用文件 · 可拖拽或粘贴图片）"></textarea>
+				<div class="composer-actions">
+					<button id="attach" type="button" title="添加附件（也可拖拽或粘贴图片）" aria-label="添加附件">＋</button>
+					<button id="send">发送</button>
+				</div>
+				<div class="composer-meta">
+					<div class="plugin-status" id="pluginStatus" hidden></div>
+					<div class="usage" id="usage" role="button" tabindex="0" aria-haspopup="dialog" title="点击查看 Codex / OpenCode 额度"></div>
+				</div>
 			</div>
 			<div class="plugin-widget" id="widgetBelow" hidden></div>
+			<input type="file" id="filePicker" multiple hidden />
 		</footer>
 
 		<div class="overlay" id="overlay" hidden>
-			<div class="picker" role="dialog" aria-label="切换会话">
+			<div class="picker w-list" role="dialog" aria-modal="true" aria-labelledby="pickerTitle" tabindex="-1">
 				<div class="picker-head">
-					<span class="picker-title">切换会话</span>
-					<span class="picker-key">↑↓ 选择 · Enter 切换 · Esc 关闭</span>
+					<span class="picker-title" id="pickerTitle">切换会话</span>
+					<div class="picker-head-right">
+						<span class="picker-key">↑↓ 选择 · Enter 切换 · Esc 关闭</span>
+						<button class="picker-close" id="pickerClose" type="button" title="关闭（Esc）" aria-label="关闭">✕</button>
+					</div>
 				</div>
 				<ul class="picker-list" id="pickerList"></ul>
 				<div class="picker-foot">切到其他会话前，确认它没有在 Orca / pi 里同时打开</div>
@@ -931,10 +1170,13 @@
 		</div>
 
 		<div class="overlay" id="navOverlay" hidden>
-			<div class="picker" role="dialog" aria-label="消息目录">
+			<div class="picker w-list" role="dialog" aria-modal="true" aria-labelledby="navTitle" tabindex="-1">
 				<div class="picker-head">
-					<span class="picker-title">消息目录</span>
-					<span class="picker-key">↑↓ 选择 · Enter 跳转 · Esc 关闭</span>
+					<span class="picker-title" id="navTitle">消息目录</span>
+					<div class="picker-head-right">
+						<span class="picker-key">↑↓ 选择 · Enter 跳转 · Esc 关闭</span>
+						<button class="picker-close" id="navClose" type="button" title="关闭（Esc）" aria-label="关闭">✕</button>
+					</div>
 				</div>
 				<ul class="picker-list" id="navList"></ul>
 				<div class="picker-foot">列出本会话的每条提问，点条目跳到对应位置</div>
@@ -942,21 +1184,41 @@
 		</div>
 
 		<div class="overlay" id="rewindOverlay" hidden>
-			<div class="picker" role="dialog" aria-label="回退">
+			<div class="picker w-list" role="dialog" aria-modal="true" aria-labelledby="rewindTitle" tabindex="-1">
 				<div class="picker-head">
-					<span class="picker-title">回退到某条提问之前</span>
-					<span class="picker-key">↑↓ 选择 · Enter 回退 · Esc 关闭</span>
+					<span class="picker-title" id="rewindTitle">回退到某条提问之前</span>
+					<div class="picker-head-right">
+						<span class="picker-key">↑↓ 选择 · Enter 回退 · Esc 关闭</span>
+						<button class="picker-close" id="rewindClose" type="button" title="关闭（Esc）" aria-label="关闭">✕</button>
+					</div>
 				</div>
 				<ul class="picker-list" id="rewindList"></ul>
 				<div class="picker-foot">被放弃的分支仍保留在会话文件里；已经改动过的文件不会回滚</div>
 			</div>
 		</div>
 
+		<div class="overlay" id="usageOverlay" hidden>
+			<div class="picker w-wide" role="dialog" aria-modal="true" aria-labelledby="usageTitle" tabindex="-1">
+				<div class="picker-head">
+					<span class="picker-title" id="usageTitle">用量与额度</span>
+					<div class="picker-head-right">
+						<span class="picker-key">Esc 关闭</span>
+						<button class="picker-close" id="usageClose" type="button" title="关闭（Esc）" aria-label="关闭">✕</button>
+					</div>
+				</div>
+				<div class="usage-body" id="usageBody"></div>
+				<div class="picker-foot" id="usageFoot"></div>
+			</div>
+		</div>
+
 		<div class="overlay" id="uiOverlay" hidden>
-			<div class="picker" role="dialog" aria-modal="true" aria-labelledby="uiTitle">
+			<div class="picker" role="dialog" aria-modal="true" aria-labelledby="uiTitle" tabindex="-1">
 				<div class="picker-head">
 					<span class="picker-title" id="uiTitle">插件请求</span>
-					<span class="picker-key" id="uiKey">Esc 取消</span>
+					<div class="picker-head-right">
+						<span class="picker-key" id="uiKey">Esc 取消</span>
+						<button class="picker-close" id="uiClose" type="button" title="关闭（按默认值交回插件）" aria-label="关闭">✕</button>
+					</div>
 				</div>
 				<p class="ui-message" id="uiMessage" hidden></p>
 				<ul class="picker-list" id="uiList" tabindex="-1" hidden></ul>
@@ -967,10 +1229,13 @@
 		</div>
 
 		<div class="overlay" id="modelOverlay" hidden>
-			<div class="picker" role="dialog" aria-label="切换模型">
+			<div class="picker w-list" role="dialog" aria-modal="true" aria-labelledby="modelTitle" tabindex="-1">
 				<div class="picker-head">
-					<span class="picker-title">切换模型</span>
-					<span class="picker-key">↑↓ 选择 · Enter 切换 · Ctrl+Enter 设为默认 · ←→ 思考等级 · Esc 关闭</span>
+					<span class="picker-title" id="modelTitle">切换模型</span>
+					<div class="picker-head-right">
+						<span class="picker-key">↑↓ 选择 · Enter 切换 · Ctrl+Enter 设为默认 · ←→ 思考等级 · Esc 关闭</span>
+						<button class="picker-close" id="modelClose" type="button" title="关闭（Esc）" aria-label="关闭">✕</button>
+					</div>
 				</div>
 				<input
 					class="picker-search"
@@ -1003,6 +1268,21 @@
 			const pickerListEl = document.getElementById('pickerList');
 			const cmdbarEl = document.getElementById('cmdbar');
 			const cmdListEl = document.getElementById('cmdList');
+			const filebarEl = document.getElementById('filebar');
+			const fileListEl = document.getElementById('fileList');
+			const attachStripEl = document.getElementById('attachStrip');
+			const attachBtnEl = document.getElementById('attach');
+			const filePickerEl = document.getElementById('filePicker');
+			const usageEl = document.getElementById('usage');
+			const usageOverlayEl = document.getElementById('usageOverlay');
+			const usageBodyEl = document.getElementById('usageBody');
+			const usageFootEl = document.getElementById('usageFoot');
+			const pickerCloseEl = document.getElementById('pickerClose');
+			const navCloseEl = document.getElementById('navClose');
+			const rewindCloseEl = document.getElementById('rewindClose');
+			const modelCloseEl = document.getElementById('modelClose');
+			const usageCloseEl = document.getElementById('usageClose');
+			const uiCloseEl = document.getElementById('uiClose');
 			const composerEl = document.getElementById('composer');
 			const jumpsEl = document.getElementById('jumps');
 			const jumpTopEl = document.getElementById('jumpTop');
@@ -1085,6 +1365,44 @@
 			let commandOpen = false;
 			let commandMatches = [];
 			let commandIndex = 0;
+			/** @ 引用文件提示条状态（fileToken 是光标前的 @ 片段：{ start, query }）。 */
+			let fileOpen = false;
+			let fileItems = [];
+			let fileIndex = 0;
+			let fileToken = null;
+			let fileFetchSeq = 0;
+			let fileFetchTimer = 0;
+			/** 待发附件：图片存 base64 + 缩略图，文本写在正文里（附件只记名字便于删）。 */
+			let attachments = [];
+			let attachSeq = 0;
+			/** 用量快照（session 帧与 usage 帧都会带来）与速率（实时 / 上一次调用的平均）。 */
+			let usageState = null;
+			let rateState = { live: null, average: null };
+			/** 上一次渲染用量时的会话 id：换会话要丢掉旧的速率与用量。 */
+			let usageSessionId = '';
+			/** 外部额度（Codex 账号额度 / OpenCode Go 套餐）与浮层状态。 */
+			let externalUsage = null;
+			let usageOpen = false;
+			let usageLoading = false;
+			let usageError = '';
+			/** 文本附件内联的上限：超过就截断并标注。 */
+			const MAX_TEXT_ATTACH_BYTES = 256 * 1024;
+			/** 图片附件的张数与单张大小上限（与服务端 parseImages 保持一致）。 */
+			const MAX_ATTACH_IMAGES = 8;
+			const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+			/** 页面认作图片的 MIME（与 pi 的视觉输入一致）。 */
+			const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+			/** 可内联为文本的扩展名白名单（MIME 为 text/* 时不再看它）。 */
+			const TEXT_ATTACH_EXTENSIONS = new Set(
+				[
+					'js', 'mjs', 'cjs', 'jsx', 'ts', 'tsx', 'vue', 'svelte', 'json', 'jsonc', 'md', 'markdown',
+					'txt', 'log', 'csv', 'tsv', 'yml', 'yaml', 'toml', 'ini', 'env', 'cfg', 'conf', 'properties',
+					'sh', 'bash', 'zsh', 'ps1', 'psm1', 'bat', 'cmd', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'kts',
+					'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'php', 'swift', 'scala', 'sql', 'graphql', 'gql', 'dart',
+					'html', 'htm', 'xml', 'svg', 'css', 'scss', 'less', 'styl', 'tex', 'r', 'lua', 'pl', 'ex', 'exs',
+					'gradle', 'gitignore', 'dockerfile', 'makefile',
+				],
+			);
 			/** 模型浮层（/model）状态。 */
 			let modelOpen = false;
 			let modelItems = [];
@@ -1880,6 +2198,18 @@
 					acceptToolResult(block, body);
 					return;
 				}
+				if (type === 'image') {
+					// 历史里的图片由服务端给 /api/image 地址，本地刚发的那条用 blob 缩略图
+					const src = block.url || block.objectUrl || '';
+					if (!src) return;
+					const image = document.createElement('img');
+					image.className = 'msg-image';
+					image.src = src;
+					image.loading = 'lazy';
+					image.alt = '已附加图片';
+					body.append(image);
+					return;
+				}
 				if (block.text) {
 					const node = document.createElement('div');
 					node.className = 'misc';
@@ -1911,11 +2241,14 @@
 				return row;
 			}
 
-			/** 本地立即显示用户消息；记录正文用于跳过服务端回显。 */
-			function addUserMessage(text) {
+			/** 本地立即显示用户消息（图片用本地 blob 缩略图，不重复渲染服务端回显）；记录正文用于跳过服务端回显。 */
+			function addUserMessage(text, images = []) {
 				const pinned = pinnedToBottom();
 				const { row, body } = createMessageRow('user', 'YOU');
-				addBlock(body, { type: 'text', text });
+				if (text) addBlock(body, { type: 'text', text });
+				for (const image of images) {
+					addBlock(body, { type: 'image', objectUrl: image.objectUrl, mimeType: image.mimeType });
+				}
 				// 记下这一行，等服务端回显时把会话条目 id 补上（也用于跳过回显造成的重复）
 				pendingUserRows.push({ text: String(text), row });
 				if (pendingUserRows.length > 20) pendingUserRows.shift();
@@ -2069,10 +2402,95 @@
 				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
 			}
 
+			/* ---------- 浮层焦点（纸面） ---------- */
+
+			/** 可聚焦元素（Tab 圈定用）。 */
+			const FOCUSABLE =
+				'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+			/** 当前打开的纸面浮层：{ overlay, restore }，用于 Tab 圈定与关闭后还焦点。 */
+			let sheetStack = [];
+
+			/** 打开浮层：记下来源焦点并把焦点移进去（没有可聚焦控件时落在容器上）。 */
+			function enterSheet(overlayEl, initialEl) {
+				const picker = overlayEl && overlayEl.querySelector('.picker');
+				if (!picker) return;
+				if (!sheetStack.some((item) => item.overlay === overlayEl)) {
+					sheetStack.push({ overlay: overlayEl, restore: document.activeElement });
+				}
+				const target = initialEl || picker.querySelector(FOCUSABLE) || picker;
+				if (target && typeof target.focus === 'function') target.focus();
+			}
+
+			/** 关闭浮层：把焦点还给打开它的地方（拿不到就回输入框）。 */
+			function leaveSheet(overlayEl) {
+				const at = sheetStack.findIndex((item) => item.overlay === overlayEl);
+				const entry = at >= 0 ? sheetStack.splice(at, 1)[0] : null;
+				const restore = entry && entry.restore;
+				if (restore && typeof restore.focus === 'function' && document.contains(restore)) {
+					restore.focus();
+					return;
+				}
+				inputEl.focus();
+			}
+
+			/** Tab 在浮层内循环，不让焦点跑到背后的页面。 */
+			function trapSheetTab(event) {
+				const overlayEl = sheetStack.length ? sheetStack[sheetStack.length - 1].overlay : null;
+				const picker = overlayEl && overlayEl.querySelector('.picker');
+				if (!picker) return;
+				// hidden 的控件 offsetParent 为 null，直接滤掉
+				const items = [...picker.querySelectorAll(FOCUSABLE)].filter(
+					(item) => !item.hidden && item.offsetParent !== null,
+				);
+				if (!items.length) {
+					event.preventDefault();
+					picker.focus();
+					return;
+				}
+				const first = items[0];
+				const last = items[items.length - 1];
+				const active = document.activeElement;
+				if (event.shiftKey && (active === first || !picker.contains(active))) {
+					event.preventDefault();
+					last.focus();
+					return;
+				}
+				if (!event.shiftKey && (active === last || !picker.contains(active))) {
+					event.preventDefault();
+					first.focus();
+				}
+			}
+
+			/**
+			 * 把列表类浮层的键位挂到浮层自己身上。
+			 * 焦点被圈进浮层后，方向键/Enter 就不再到输入框上了，所以这些键得在浮层里再绑一遍；
+			 * 内部控件（模型搜索框、插件输入框等）已经处理过的按键用 defaultPrevented 跳过，避免重复触发。
+			 */
+			function bindSheetKeys(overlayEl, onMove, onConfirm, onHorizontal) {
+				overlayEl.addEventListener('keydown', (event) => {
+					if (event.defaultPrevented) return;
+					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+						event.preventDefault();
+						onMove(event.key === 'ArrowDown' ? 1 : -1);
+						return;
+					}
+					if (onHorizontal && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+						event.preventDefault();
+						onHorizontal(event.key === 'ArrowRight' ? 1 : -1);
+						return;
+					}
+					if (event.key === 'Enter') {
+						event.preventDefault();
+						onConfirm(event);
+					}
+				});
+			}
+
 			/** 打开会话选择器（输入 /resume 触发）。 */
 			async function openSessionPicker() {
 				pickerOpen = true;
 				overlayEl.hidden = false;
+				enterSheet(overlayEl);
 				pickerItems = [];
 				pickerIndex = 0;
 				renderPicker('正在读取会话列表…');
@@ -2096,6 +2514,7 @@
 			function closeSessionPicker() {
 				pickerOpen = false;
 				overlayEl.hidden = true;
+				leaveSheet(overlayEl);
 			}
 
 			/** 上下键移动高亮。 */
@@ -2219,6 +2638,8 @@
 				if (modelOpen) return;
 				modelOpen = true;
 				modelOverlayEl.hidden = false;
+				// 焦点先给搜索框（模型列表的主要入口就是搜索）
+				enterSheet(modelOverlayEl, modelSearchEl);
 				modelQuery = String(prefill || '');
 				modelSearchEl.value = modelQuery;
 				modelItems = [];
@@ -2259,7 +2680,7 @@
 				modelOpen = false;
 				modelNotice = '';
 				modelOverlayEl.hidden = true;
-				inputEl.focus();
+				leaveSheet(modelOverlayEl);
 			}
 
 			/** 上下键在模型列表里移动。 */
@@ -2393,6 +2814,281 @@
 				renderCommands();
 			}
 
+			/* ---------- @ 引用文件 ---------- */
+
+			/** 光标前是否正好是一个 @ 引用片段；是则返回它在文本里的起始位置与查询串。 */
+			function fileQueryAt() {
+				const text = inputEl.value;
+				const caret = inputEl.selectionStart ?? text.length;
+				const before = text.slice(0, caret);
+				const at = before.lastIndexOf('@');
+				// @ 必须在行首或空白之后，且查询串里不能有空白（有空白说明这段引用已经写完）
+				if (at < 0) return null;
+				if (at > 0 && !/\s/.test(before[at - 1])) return null;
+				const query = before.slice(at + 1);
+				if (/\s/.test(query)) return null;
+				return { start: at, query };
+			}
+
+			/** 按光标位置刷新 @ 提示条；带 120ms 防抖，不因为每敲一个字就打一次服务端。 */
+			function refreshFiles() {
+				// 别的浮层或命令提示条在用时，让给它们
+				if (pickerOpen || rewindOpen || navOpen || modelOpen || uiActive || commandQuery() !== null) {
+					hideFiles();
+					return;
+				}
+				const token = fileQueryAt();
+				if (!token) {
+					hideFiles();
+					return;
+				}
+				fileToken = token;
+				const seq = ++fileFetchSeq;
+				const query = token.query;
+				if (fileFetchTimer) clearTimeout(fileFetchTimer);
+				fileFetchTimer = setTimeout(async () => {
+					fileFetchTimer = 0;
+					let files = [];
+					try {
+						const response = await fetch('/api/files?q=' + encodeURIComponent(query));
+						const data = await response.json();
+						files = Array.isArray(data.files) ? data.files : [];
+					} catch {
+						files = [];
+					}
+					// 期间输入变了或提示条已收起：丢弃这次结果
+					if (seq !== fileFetchSeq || !fileToken) return;
+					fileItems = files;
+					fileIndex = 0;
+					fileOpen = true;
+					filebarEl.hidden = false;
+					renderFiles();
+				}, 120);
+			}
+
+			/** 渲染 @ 提示条（目录以 / 结尾且用强调色区分）。 */
+			function renderFiles() {
+				fileListEl.replaceChildren();
+				if (!fileItems.length) {
+					const empty = document.createElement('li');
+					empty.className = 'file-empty';
+					empty.textContent = '没有匹配的文件';
+					fileListEl.append(empty);
+					return;
+				}
+				fileItems.forEach((item, index) => {
+					const li = document.createElement('li');
+					li.className = 'cmd-item';
+					li.dataset.active = String(index === fileIndex);
+					li.dataset.dir = String(Boolean(item.dir));
+					const name = document.createElement('span');
+					name.className = 'path';
+					name.textContent = item.dir ? item.path + '/' : item.path;
+					li.append(name);
+					// 用 mousedown 抢在输入框失焦之前执行，避免点击被 blur 吃掉
+					li.addEventListener('mousedown', (event) => {
+						event.preventDefault();
+						applyFile(index);
+					});
+					fileListEl.append(li);
+				});
+				const active = fileListEl.children[fileIndex];
+				if (active && active.scrollIntoView) active.scrollIntoView({ block: 'nearest' });
+			}
+
+			/** 收起 @ 提示条，并作废在途的查询。 */
+			function hideFiles() {
+				fileFetchSeq += 1;
+				if (fileFetchTimer) {
+					clearTimeout(fileFetchTimer);
+					fileFetchTimer = 0;
+				}
+				fileOpen = false;
+				fileItems = [];
+				fileIndex = 0;
+				fileToken = null;
+				filebarEl.hidden = true;
+			}
+
+			/** 上下键移动 @ 提示条高亮。 */
+			function moveFile(delta) {
+				if (!fileItems.length) return;
+				fileIndex = (fileIndex + delta + fileItems.length) % fileItems.length;
+				renderFiles();
+			}
+
+			/**
+			 * 选中一条候选：把光标前的 @ 片段换成它。
+			 * 文件插入相对路径并补一个空格（与 pi 的 @ 补全一致，@ 被消耗）；
+			 * 目录则保留 @、插入 dir/，好接着往下钻。含空格的路径用引号包起来。
+			 */
+			function applyFile(index) {
+				const item = fileItems[index];
+				const token = fileToken;
+				if (!item || !token) return;
+				const text = inputEl.value;
+				const caret = inputEl.selectionStart ?? text.length;
+				const raw = item.dir ? item.path + '/' : item.path;
+				const quoted = /[\s"]/.test(raw) ? '"' + raw.replace(/"/g, '') + '"' : raw;
+				const inserted = (item.dir ? '@' : '') + quoted;
+				const suffix = item.dir ? '' : ' ';
+				inputEl.value = text.slice(0, token.start) + inserted + suffix + text.slice(caret);
+				const nextCaret = token.start + inserted.length + suffix.length;
+				inputEl.setSelectionRange(nextCaret, nextCaret);
+				autoGrow();
+				fileIndex = 0;
+				// 目录要继续往下一层搜，文件已经写完这段引用（refreshFiles 会自行收起）
+				refreshFiles();
+				inputEl.focus();
+			}
+
+			/* ---------- 待发附件（图片 / 文本） ---------- */
+
+			/** 当前待发的图片附件。 */
+			function imageAttachments() {
+				return attachments.filter((item) => item.kind === 'image');
+			}
+
+			/** 是否按文本附件处理：text/* 一律算，其余看扩展名白名单。 */
+			function isTextAttachment(name, mimeType) {
+				if (mimeType.startsWith('text/')) return true;
+				if (/^application\/(json|javascript|xml|x-yaml|yaml|x-sh|sql)$/.test(mimeType)) return true;
+				const dot = name.lastIndexOf('.');
+				const ext = dot >= 0 ? name.slice(dot + 1).toLowerCase() : '';
+				return TEXT_ATTACH_EXTENSIONS.has(ext);
+			}
+
+			/** 字节转 base64（分块拼接，避免大文件把参数列表撑爆）。 */
+			function bytesToBase64(bytes) {
+				let binary = '';
+				const chunk = 0x8000;
+				for (let index = 0; index < bytes.length; index += chunk) {
+					binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+				}
+				return btoa(binary);
+			}
+
+			/** 加入一个附件：图片存 base64 与缩略图，文本直接内联进正文。 */
+			async function addAttachment(file) {
+				const name = String(file?.name || '未命名文件');
+				const mimeType = String(file?.type || '').toLowerCase();
+				if (IMAGE_MIME_TYPES.has(mimeType)) {
+					if (file.size > MAX_IMAGE_BYTES) {
+						addStatusRow('图片超过 ' + Math.round(MAX_IMAGE_BYTES / 1024 / 1024) + 'MB，已跳过：' + name, 'error');
+						return;
+					}
+					if (imageAttachments().length >= MAX_ATTACH_IMAGES) {
+						addStatusRow('一次最多发送 ' + MAX_ATTACH_IMAGES + ' 张图片', 'error');
+						return;
+					}
+					let base64 = '';
+					try {
+						base64 = bytesToBase64(new Uint8Array(await file.arrayBuffer()));
+					} catch {
+						addStatusRow('读取失败：' + name, 'error');
+						return;
+					}
+					attachments.push({
+						id: ++attachSeq,
+						kind: 'image',
+						name,
+						size: file.size,
+						mimeType,
+						base64,
+						objectUrl: URL.createObjectURL(file),
+					});
+					renderAttachments();
+					return;
+				}
+				if (isTextAttachment(name, mimeType)) {
+					await addTextAttachment(file, name);
+					return;
+				}
+				addStatusRow('暂不支持这种附件：' + name + '（可改用 @ 引用让 pi 自己读）', 'error');
+			}
+
+			/** 一次加入多个附件（拖拽／粘贴可能一下丢进来好几个）。 */
+			async function addAttachments(files) {
+				for (const file of files) await addAttachment(file);
+				inputEl.focus();
+			}
+
+			/** 文本附件：内容以围栏代码块内联进正文，并留一条可删的附件条。 */
+			async function addTextAttachment(file, name) {
+				let text = '';
+				try {
+					text = await file.text();
+				} catch {
+					addStatusRow('读取失败：' + name, 'error');
+					return;
+				}
+				let truncated = false;
+				if (file.size > MAX_TEXT_ATTACH_BYTES || text.length > MAX_TEXT_ATTACH_BYTES) {
+					text = text.slice(0, MAX_TEXT_ATTACH_BYTES);
+					truncated = true;
+				}
+				const body = text.endsWith('\n') ? text : text + '\n';
+				const note = truncated ? '…（内容已截断）\n' : '';
+				const block = '```' + name + '\n' + body + note + '```';
+				const current = inputEl.value.trimEnd();
+				inputEl.value = (current ? current + '\n\n' : '') + block + '\n';
+				attachments.push({ id: ++attachSeq, kind: 'text', name, size: file.size, block, truncated });
+				autoGrow();
+				renderAttachments();
+			}
+
+			/** 画待发附件条：图片给缩略图，文本给文件名。 */
+			function renderAttachments() {
+				attachStripEl.replaceChildren();
+				attachStripEl.hidden = attachments.length === 0;
+				for (const item of attachments) {
+					const chip = document.createElement('div');
+					chip.className = 'attach-chip';
+					chip.title = item.name;
+					if (item.kind === 'image') {
+						const thumb = document.createElement('img');
+						thumb.className = 'attach-thumb';
+						thumb.src = item.objectUrl;
+						thumb.alt = item.name;
+						chip.append(thumb);
+					}
+					const label = document.createElement('span');
+					label.className = 'attach-name';
+					label.textContent = item.name + (item.truncated ? '（已截断）' : '');
+					const remove = document.createElement('button');
+					remove.className = 'attach-remove';
+					remove.type = 'button';
+					remove.title = '移除附件';
+					remove.textContent = '×';
+					remove.addEventListener('click', () => removeAttachment(item.id));
+					chip.append(label, remove);
+					attachStripEl.append(chip);
+				}
+				syncJumpPosition();
+			}
+
+			/** 移除一个待发附件；文本附件同时从正文里删掉它内联的代码块。 */
+			function removeAttachment(id) {
+				const index = attachments.findIndex((item) => item.id === id);
+				if (index < 0) return;
+				const [item] = attachments.splice(index, 1);
+				if (item.kind === 'image' && item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+				if (item.kind === 'text' && item.block) {
+					inputEl.value = inputEl.value.replace(item.block, '').trimEnd();
+					autoGrow();
+				}
+				renderAttachments();
+			}
+
+			/** 清空待发附件；发送后传 revoke=false，因为本地回显的缩略图还在用这些 blob URL。 */
+			function clearAttachments({ revoke = true } = {}) {
+				for (const item of attachments) {
+					if (revoke && item.kind === 'image' && item.objectUrl) URL.revokeObjectURL(item.objectUrl);
+				}
+				attachments = [];
+				renderAttachments();
+			}
+
 			/** 执行页面内命令；返回 false 表示不是已知命令（应当作普通消息发送）。 */
 			async function runCommand(name) {
 				const text = String(name || '').trim();
@@ -2469,6 +3165,7 @@
 				navIndex = at >= 0 ? at : 0;
 				navOpen = true;
 				navOverlayEl.hidden = false;
+				enterSheet(navOverlayEl);
 				renderNav();
 			}
 
@@ -2476,6 +3173,7 @@
 			function closeNav() {
 				navOpen = false;
 				navOverlayEl.hidden = true;
+				leaveSheet(navOverlayEl);
 			}
 
 			/** 上下键移动目录高亮。 */
@@ -2549,15 +3247,16 @@
 				rewindIndex = rewindItems.length ? rewindItems.length - 1 : 0;
 				rewindOpen = true;
 				rewindOverlayEl.hidden = false;
+				enterSheet(rewindOverlayEl);
 				renderRewind();
 			}
 
-			/** 关闭回退浮层，把焦点还给输入框。 */
+			/** 关闭回退浮层，把焦点还给打开它的地方。 */
 			function closeRewind() {
 				if (!rewindOpen) return;
 				rewindOpen = false;
 				rewindOverlayEl.hidden = true;
-				inputEl.focus();
+				leaveSheet(rewindOverlayEl);
 			}
 
 			/** 上下键移动回退高亮。 */
@@ -2699,6 +3398,7 @@
 					uiTimeoutTimer = 0;
 				}
 				uiOverlayEl.hidden = true;
+				leaveSheet(uiOverlayEl);
 			}
 
 			/** 弹出队首对话框；队列空了就把焦点还给输入框。 */
@@ -2717,6 +3417,8 @@
 				const item = uiActive;
 				const isList = item.method === 'select' || item.method === 'confirm';
 				uiOverlayEl.hidden = false;
+				// 记下来源焦点与栈；具体把焦点放哪个控件由下面按 method 决定
+				enterSheet(uiOverlayEl);
 				uiTitleEl.textContent = item.title || '插件请求';
 				uiMessageEl.hidden = !item.message;
 				uiMessageEl.textContent = item.message || '';
@@ -2830,6 +3532,236 @@
 				for (const item of context.pluginErrors || []) addStatusRow(`插件加载失败：${item.path || '(未知)'} — ${item.error || ''}`, 'error');
 			}
 
+			/** 大数字的短格式：1234 → 1.2K、1234567 → 1.2M。 */
+			function formatTokens(value) {
+				const size = Number(value) || 0;
+				if (size >= 1e6) return (size / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+				if (size >= 1000) return (size / 1000).toFixed(1).replace(/\.0$/, '') + 'K';
+				return String(size);
+			}
+
+			/** 毫秒时间戳 → “2小时13分后重置”。 */
+			function formatResetIn(at) {
+				if (!Number.isFinite(at)) return '';
+				const minutes = Math.floor((at - Date.now()) / 60000);
+				if (minutes <= 0) return '即将重置';
+				const days = Math.floor(minutes / 1440);
+				const hours = Math.floor((minutes % 1440) / 60);
+				if (days > 0) return `${days}天${hours}小时后重置`;
+				if (hours > 0) return `${hours}小时${minutes % 60}分后重置`;
+				return `${minutes}分钟后重置`;
+			}
+
+			/** ISO 时间字符串（OpenCode 用）→ 同样的倒计时文案。 */
+			function formatResetAt(value) {
+				if (!value) return '';
+				const at = Date.parse(value);
+				return Number.isFinite(at) ? formatResetIn(at) : '';
+			}
+
+			/** 行内最短摘要：Codex 剩余最低的窗口、OpenCode Go 用得最多的窗口。 */
+			function usageBadgeText() {
+				const parts = [];
+				const codex = externalUsage?.codex;
+				if (codex?.ok) {
+					const windows = (codex.windows || []).filter((item) => Number.isFinite(item.remainingPercent));
+					if (windows.length) {
+						const lowest = windows.reduce((a, b) => (a.remainingPercent <= b.remainingPercent ? a : b));
+						parts.push('Codex 剩' + Math.round(lowest.remainingPercent) + '%');
+					}
+				}
+				const opencode = externalUsage?.opencode;
+				if (opencode?.ok) {
+					const windows = (opencode.windows || []).filter((item) => Number.isFinite(item.usedPercent));
+					if (windows.length) {
+						const highest = windows.reduce((a, b) => (a.usedPercent >= b.usedPercent ? a : b));
+						parts.push('Go 已用' + Math.round(highest.usedPercent) + '%');
+					}
+				}
+				return parts.join(' · ');
+			}
+
+			/** 拉外部额度（服务端 60 秒缓存）；完成后刷新行内摘要与浮层。 */
+			async function loadExternalUsage(force = false) {
+				if (usageLoading) return;
+				usageLoading = true;
+				if (usageOpen) renderUsageOverlay();
+				try {
+					const response = await fetch('/api/usage/external' + (force ? '?refresh=1' : ''));
+					externalUsage = await response.json();
+					usageError = '';
+				} catch (err) {
+					usageError = '读取失败：' + String((err && err.message) || err);
+				}
+				usageLoading = false;
+				renderUsage();
+				if (usageOpen) renderUsageOverlay();
+			}
+
+			/** 打开额度浮层；首次打开会现拉一次外部额度（行内摘要可能已经拉过）。 */
+			function openUsageOverlay() {
+				if (usageOpen) return;
+				usageOpen = true;
+				usageOverlayEl.hidden = false;
+				enterSheet(usageOverlayEl);
+				renderUsageOverlay();
+				void loadExternalUsage(false);
+			}
+
+			/** 关闭额度浮层。 */
+			function closeUsageOverlay() {
+				if (!usageOpen) return;
+				usageOpen = false;
+				usageOverlayEl.hidden = true;
+				leaveSheet(usageOverlayEl);
+			}
+
+			/** 把本会话用量 + Codex 额度 + OpenCode Go 套餐用量画进浮层。 */
+			function renderUsageOverlay() {
+				usageBodyEl.replaceChildren();
+				const section = (title) => {
+					const node = document.createElement('div');
+					node.className = 'usage-section';
+					const head = document.createElement('h4');
+					head.textContent = title;
+					node.append(head);
+					usageBodyEl.append(node);
+					return node;
+				};
+				const line = (parent, text, className) => {
+					const node = document.createElement('div');
+					node.className = className || 'usage-line';
+					node.textContent = text;
+					parent.append(node);
+				};
+
+				// 本会话（pi）
+				const session = section('本会话');
+				if (usageState) {
+					line(
+						session,
+						`↑${formatTokens(usageState.input)} ↓${formatTokens(usageState.output)} ` +
+							`R${formatTokens(usageState.cacheRead)} W${formatTokens(usageState.cacheWrite)} ` +
+							`$${(Number(usageState.cost) || 0).toFixed(3)}`,
+					);
+					const context = usageState.context || null;
+					const percent = context && Number.isFinite(context.percent) ? context.percent.toFixed(1) + '%' : '?';
+					const windowSize = context && Number.isFinite(context.contextWindow) ? formatTokens(context.contextWindow) : '?';
+					line(session, `上下文 ${percent}/${windowSize}`);
+				} else {
+					line(session, '用量 —', 'usage-note');
+				}
+				const rates = [];
+				if (Number.isFinite(rateState.live)) rates.push('实 ' + rateState.live.toFixed(1) + ' t/s');
+				if (Number.isFinite(rateState.average)) rates.push('均 ' + rateState.average.toFixed(1) + ' t/s');
+				if (rates.length) line(session, rates.join(' · '));
+
+				// Codex 账号额度
+				const codexSection = section('Codex 额度');
+				const codex = externalUsage?.codex;
+				if (!codex) line(codexSection, usageLoading ? '读取中…' : '尚未读取', 'usage-note');
+				else if (!codex.ok) line(codexSection, codex.error || '读取失败', 'usage-note error');
+				else {
+					if (!(codex.windows || []).length) line(codexSection, '接口没有返回窗口数据', 'usage-note');
+					for (const window of codex.windows || []) {
+						const remain = Number.isFinite(window.remainingPercent)
+							? '剩余 ' + window.remainingPercent.toFixed(1) + '%'
+							: '剩余 ?';
+						const reset = formatResetIn(window.resetAt);
+						line(codexSection, `${window.label}：${remain}${reset ? ' · ' + reset : ''}`);
+					}
+					if (codex.credits) line(codexSection, '可用额度 ' + codex.credits);
+					if (codex.limitReached) line(codexSection, '当前窗口额度已用尽', 'usage-note error');
+				}
+
+				// OpenCode Go（percent 是已用）
+				const goSection = section('OpenCode Go');
+				const opencode = externalUsage?.opencode;
+				if (!opencode) line(goSection, usageLoading ? '读取中…' : '尚未读取', 'usage-note');
+				else if (!opencode.ok) line(goSection, opencode.error || '读取失败', 'usage-note error');
+				else {
+					if (!(opencode.windows || []).length) line(goSection, '接口没有返回窗口数据', 'usage-note');
+					for (const window of opencode.windows || []) {
+						const used = Number.isFinite(window.usedPercent)
+							? `已用 ${window.usedPercent.toFixed(1)}%（剩余 ${(100 - window.usedPercent).toFixed(1)}%）`
+							: '已用 ?';
+						const reset = formatResetAt(window.resetsAt);
+						line(goSection, `${window.label}：${used}${reset ? ' · ' + reset : ''}`);
+					}
+					for (const window of opencode.windows || []) {
+						if (window.status && window.status !== 'ok') {
+							line(goSection, `${window.label} 状态：${window.status}`, 'usage-note warn');
+						}
+					}
+				}
+
+				if (usageError) line(usageBodyEl, usageError, 'usage-note error');
+
+				// 底部：更新时间 + 手动刷新（刷新会绕过服务端的 60 秒缓存）
+				usageFootEl.replaceChildren();
+				const updated = externalUsage && Number.isFinite(externalUsage.fetchedAt) ? new Date(externalUsage.fetchedAt) : null;
+				const time = document.createElement('span');
+				time.textContent = `${updated ? '更新于 ' + updated.toLocaleTimeString('zh-CN', { hour12: false }) : '尚未读取'}（缓存 60 秒）`;
+				const refresh = document.createElement('button');
+				refresh.type = 'button';
+				refresh.className = 'sheet-btn';
+				refresh.textContent = usageLoading ? '刷新中…' : '刷新';
+				refresh.disabled = usageLoading;
+				refresh.addEventListener('click', () => void loadExternalUsage(true));
+				usageFootEl.append(time, refresh);
+			}
+
+			/** 渲染输入区下方的用量与速率行；没有任何数据时退化成占位。 */
+			function renderUsage() {
+				usageEl.replaceChildren();
+				if (!usageState) {
+					// 本会话统计拿不到时，外部额度摘要仍然可以显示
+					const fallback = usageBadgeText();
+					usageEl.textContent = fallback ? `用量 — · ${fallback}` : '用量 —';
+					return;
+				}
+				const head = document.createElement('span');
+				head.textContent = [
+					'↑' + formatTokens(usageState.input),
+					'↓' + formatTokens(usageState.output),
+					'R' + formatTokens(usageState.cacheRead),
+					'W' + formatTokens(usageState.cacheWrite),
+					'$' + (Number(usageState.cost) || 0).toFixed(3),
+				].join(' ');
+				usageEl.append(head);
+
+				const context = usageState.context || null;
+				const percent = context && Number.isFinite(context.percent) ? context.percent : null;
+				const windowSize =
+					context && Number.isFinite(context.contextWindow) ? formatTokens(context.contextWindow) : '?';
+				const contextNode = document.createElement('span');
+				contextNode.textContent =
+					'上下文 ' + (percent === null ? '?' : percent.toFixed(1) + '%') + '/' + windowSize;
+				// 占用过高时变色提醒（70% 警告、90% 危险）
+				if (percent !== null && percent >= 90) contextNode.className = 'danger';
+				else if (percent !== null && percent >= 70) contextNode.className = 'warn';
+				usageEl.append(contextNode);
+
+				const rate = (value, label) => {
+					if (!Number.isFinite(value)) return;
+					const node = document.createElement('span');
+					node.className = 'rate';
+					node.textContent = label + ' ' + value.toFixed(1) + ' t/s';
+					usageEl.append(node);
+				};
+				rate(rateState.live, '实');
+				rate(rateState.average, '均');
+
+				// 行内最短摘要：外部额度拿到了才显示（未登录/失败就不占位置）
+				const badge = usageBadgeText();
+				if (badge) {
+					const node = document.createElement('span');
+					node.className = 'badge';
+					node.textContent = badge;
+					usageEl.append(node);
+				}
+			}
+
 			/** 更新顶栏运行状态。 */
 			function setBusy(next) {
 				const busy = Boolean(next);
@@ -2855,6 +3787,14 @@
 				currentSessionPath = context.sessionFile || '';
 				currentModelKey = context.model || '';
 				thinkLevel = context.thinkingLevel || thinkLevel;
+				// 换会话（含新建）时丢掉旧的用量与速率；同一会话刷新/切模型则保留实时值
+				const sessionKey = String(context.sessionId || context.sessionFile || '');
+				if (sessionKey !== usageSessionId) {
+					usageSessionId = sessionKey;
+					rateState = { live: null, average: null };
+				}
+				usageState = context.usage || null;
+				renderUsage();
 				if (modelOpen) renderThinkBar();
 				setBusy(context.busy);
 				noticePlugins(context);
@@ -2898,6 +3838,22 @@
 					}
 					if (frame.kind === 'timer') {
 						handleTimerFrame(frame);
+						return;
+					}
+					if (frame.kind === 'usage') {
+						usageState = frame.usage || null;
+						renderUsage();
+						return;
+					}
+					if (frame.kind === 'rate') {
+						if (frame.phase === 'live') rateState.live = Number.isFinite(frame.live) ? frame.live : null;
+						else if (frame.phase === 'idle') rateState.live = null;
+						else if (frame.phase === 'end') {
+							rateState.live = null;
+							// 这一条调用没算出平均（太短 / 无 usage）就保留上一次的，别把数字弄丢
+							if (Number.isFinite(frame.average)) rateState.average = frame.average;
+						}
+						renderUsage();
 						return;
 					}
 					if (frame.kind === 'delta') {
@@ -2998,20 +3954,25 @@
 				return source;
 			}
 
-			/** 发送一条消息（运行中时服务端会自动转为 steer）。 */
+			/** 发送一条消息（运行中时服务端会自动转为 steer）；图片附件随消息一起发。 */
 			async function send() {
 				const text = inputEl.value.trim();
-				if (!text) return;
+				const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
+				if (!text && !images.length) return;
 				// 页面内命令（/resume、/model、/new）只在本页处理，不发给模型
-				if (await runCommand(text)) return;
+				if (text && (await runCommand(text))) return;
+				// 发送前先留下本地缩略图信息，清单清空后再画本地行
+				const previews = imageAttachments().map((item) => ({ objectUrl: item.objectUrl, mimeType: item.mimeType }));
 				inputEl.value = '';
 				autoGrow();
-				addUserMessage(text);
+				// revoke=false：本地回显的缩略图还在用这些 blob URL
+				clearAttachments({ revoke: false });
+				addUserMessage(text, previews);
 				if (pinnedToBottom()) messagesEl.scrollTop = messagesEl.scrollHeight;
 				await fetch('/api/prompt', {
 					method: 'POST',
 					headers: { 'content-type': 'application/json' },
-					body: JSON.stringify({ message: text }),
+					body: JSON.stringify(images.length ? { message: text, images } : { message: text }),
 				}).catch(() => addStatusRow('发送失败：本地服务没有响应', 'error'));
 			}
 
@@ -3022,9 +3983,11 @@
 				const computed = getComputedStyle(inputEl);
 				const borders = parseFloat(computed.borderTopWidth) + parseFloat(computed.borderBottomWidth);
 				const wanted = inputEl.scrollHeight + borders;
-				inputEl.style.height = Math.min(wanted, 200) + 'px';
+				// 上限跟着视口高度走：矮窗口下输入框不该把消息区顶没
+				const maxHeight = Math.min(200, window.innerHeight * 0.4);
+				inputEl.style.height = Math.min(wanted, maxHeight) + 'px';
 				// 只有到上限、内容确实放不下时才让 textarea 自己滚动
-				inputEl.style.overflowY = wanted > 200 ? 'auto' : 'hidden';
+				inputEl.style.overflowY = wanted > maxHeight ? 'auto' : 'hidden';
 				syncJumpPosition();
 			}
 
@@ -3032,6 +3995,33 @@
 			inputEl.addEventListener('input', () => {
 				autoGrow();
 				refreshCommands();
+				refreshFiles();
+			});
+			// 附件入口：回形针选文件、拖拽、粘贴图片（内容只在浏览器本地读，不经服务端读盘）
+			attachBtnEl.addEventListener('click', () => filePickerEl.click());
+			filePickerEl.addEventListener('change', () => {
+				const files = [...filePickerEl.files];
+				filePickerEl.value = '';
+				if (files.length) void addAttachments(files);
+			});
+			composerEl.addEventListener('dragover', (event) => {
+				event.preventDefault();
+			});
+			composerEl.addEventListener('drop', (event) => {
+				const files = [...(event.dataTransfer?.files ?? [])];
+				if (!files.length) return;
+				event.preventDefault();
+				void addAttachments(files);
+			});
+			inputEl.addEventListener('paste', (event) => {
+				const items = [...(event.clipboardData?.items ?? [])];
+				const files = [
+					...items.filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter(Boolean),
+					...(event.clipboardData?.files ?? []),
+				];
+				if (!files.length) return;
+				event.preventDefault();
+				void addAttachments(files);
 			});
 			inputEl.addEventListener('keydown', (event) => {
 				// 选择器打开时，键盘先服务于选择器
@@ -3118,12 +4108,33 @@
 						return;
 					}
 				}
+				// @ 提示条打开时，键盘先服务于提示条
+				if (fileOpen) {
+					if (event.key === 'Escape') {
+						event.preventDefault();
+						hideFiles();
+						return;
+					}
+					if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+						event.preventDefault();
+						moveFile(event.key === 'ArrowDown' ? 1 : -1);
+						return;
+					}
+					if ((event.key === 'Enter' || event.key === 'Tab') && fileItems.length) {
+						event.preventDefault();
+						applyFile(fileIndex);
+						return;
+					}
+				}
 				if (event.key === 'Enter' && !event.shiftKey) {
 					event.preventDefault();
 					void send();
 				}
 			});
-			inputEl.addEventListener('blur', hideCommands);
+			inputEl.addEventListener('blur', () => {
+				hideCommands();
+				hideFiles();
+			});
 			overlayEl.addEventListener('click', (event) => {
 				if (event.target === overlayEl) closeSessionPicker();
 			});
@@ -3167,6 +4178,69 @@
 			});
 			document.addEventListener('keydown', (event) => {
 				if (event.key === 'Escape' && modelOpen) closeModelPicker();
+			});
+			// 用量行：点一下（或 Enter / Space）看 Codex 额度与 OpenCode Go 套餐用量
+			usageEl.addEventListener('click', openUsageOverlay);
+			usageEl.addEventListener('keydown', (event) => {
+				if (event.key === 'Enter' || event.key === ' ') {
+					event.preventDefault();
+					openUsageOverlay();
+				}
+			});
+			usageOverlayEl.addEventListener('click', (event) => {
+				if (event.target === usageOverlayEl) closeUsageOverlay();
+			});
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Escape' && usageOpen) closeUsageOverlay();
+			});
+			// 目录 / 回退与其它浮层保持一致：点遮罩关闭（插件对话框不做，点遮罩会意外取消插件请求）
+			navOverlayEl.addEventListener('click', (event) => {
+				if (event.target === navOverlayEl) closeNav();
+			});
+			rewindOverlayEl.addEventListener('click', (event) => {
+				if (event.target === rewindOverlayEl) closeRewind();
+			});
+			// 右上角关闭按钮（与 Esc 同义）
+			pickerCloseEl.addEventListener('click', closeSessionPicker);
+			navCloseEl.addEventListener('click', closeNav);
+			rewindCloseEl.addEventListener('click', closeRewind);
+			modelCloseEl.addEventListener('click', closeModelPicker);
+			usageCloseEl.addEventListener('click', closeUsageOverlay);
+			// 插件对话框的 ✕ 与 Esc 一致：按默认值交回插件，而不是只把浮层藏起来
+			uiCloseEl.addEventListener('click', () => answerUI(uiActive, { cancelled: true }));
+			// 焦点被圈进浮层后，方向键 / Enter 仍然要能操作列表（原本这些键绑在输入框上）
+			bindSheetKeys(overlayEl, movePicker, () => {
+				const info = pickerItems[pickerIndex];
+				if (info) void switchSession(info.path);
+			});
+			bindSheetKeys(navOverlayEl, moveNav, () => {
+				const item = navItems[navIndex];
+				if (item) jumpToRow(item.row);
+			});
+			bindSheetKeys(rewindOverlayEl, moveRewind, () => {
+				const item = rewindItems[rewindIndex];
+				if (item) void confirmRewind(item);
+			});
+			bindSheetKeys(
+				modelOverlayEl,
+				moveModel,
+				(event) => {
+					const model = modelVisible[modelIndex];
+					if (model) void switchModel(model, event.ctrlKey || event.metaKey);
+				},
+				moveThinking,
+			);
+			bindSheetKeys(uiOverlayEl, moveUI, () => {
+				const item = uiActive;
+				if (!item) return;
+				// 与各控件自己的 Enter 行为一致：列表/确认选中的项，输入类提交当前值
+				if (item.method === 'select' || item.method === 'confirm') answerUIList(uiIndex);
+				else if (item.method === 'input') answerUI(item, { value: uiInputEl.value });
+				else answerUI(item, { value: uiEditorEl.value });
+			});
+			// Tab 在浮层内循环，不让焦点跑到背板页面
+			document.addEventListener('keydown', (event) => {
+				if (event.key === 'Tab' && sheetStack.length) trapSheetTab(event);
 			});
 			document.getElementById('abort').addEventListener('click', () => {
 				void fetch('/api/abort', { method: 'POST' }).catch(() => {});
@@ -3239,6 +4313,9 @@
 			// 首屏也要按内容算一次高度，否则 rows="1" 的默认高度可能比内容矮一点点而画出滚动条
 			autoGrow();
 			syncJumpButtons();
+			renderUsage();
+			// 行内额度摘要：等首屏画完再拉，不和渲染抢时间；未登录或接口失败就不显示
+			setTimeout(() => void loadExternalUsage(false), 1000);
 
 			showEmptyHint();
 			fetch('/api/context')

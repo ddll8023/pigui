@@ -14,6 +14,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
@@ -23,8 +24,55 @@ const MAX_FRAME_BYTES = 256 * 1024;
 const HISTORY_PART_BYTES = 128 * 1024;
 /** 单个内容块的文本上限：超出截断，避免工具输出这类几 MB 的内容把一帧撑爆。 */
 const MAX_BLOCK_TEXT = 48 * 1024;
-/** 请求体上限，防止超大 POST。 */
-const MAX_BODY_BYTES = 1024 * 1024;
+/** 请求体上限：图片附件走 base64，按“8 张 × 10MB”留量（见 MAX_ATTACH_IMAGES / MAX_IMAGE_BYTES）。 */
+const MAX_BODY_BYTES = 32 * 1024 * 1024;
+/** 单条消息最多带几张图片。 */
+const MAX_ATTACH_IMAGES = 8;
+/** 单张图片的原始字节上限（更大的一般也会被 pi 的图片缩放挡下，不值得先传上来）。 */
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+/** @ 搜索一次最多返回多少条候选。 */
+const FILE_SEARCH_LIMIT = 50;
+/** 文件索引的条数上限：没有 git 的目录靠遍历兜底，避免把整盘扫一遍。 */
+const FILE_INDEX_MAX = 20000;
+/** 文件索引的缓存时间：@ 每敲一个字都会查一次，不能每次真的去列目录。 */
+const FILE_INDEX_TTL_MS = 10000;
+/** 页面允许作为附件发送的图片类型（与 pi 的视觉输入一致）。 */
+const IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+/** 实时速率的滑动窗口：只看最近这段时间的输出，与 token-rate 扩展一致。 */
+const RATE_WINDOW_MS = 2000;
+/** 实时速率的刷新间隔：每拍重算一次窗口（窗口会自己变短，所以静止时速率会衰减）。 */
+const RATE_TICK_MS = 250;
+/** 窗口小于这个时长时不给速率，避免刚开头几个 token 算出天量。 */
+const RATE_MIN_ELAPSED_MS = 250;
+/** 超过这么久没有新的输出事件就停表，并告诉页面实时速率收尾。 */
+const RATE_QUIET_MS = 2000;
+/** 用量帧的节流：getSessionStats 要遍历整个会话，不能每个事件都算一遍。 */
+const USAGE_THROTTLE_MS = 400;
+/** Codex 账号额度接口（ChatGPT 内部接口，非公开 API，随时可能失效）。 */
+const CODEX_USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+/** OpenCode Go 订阅用量接口（Zen 内部接口，非公开 API，随时可能失效）。 */
+const OPENCODE_GO_USAGE_URL = 'https://opencode.ai/zen/go/v1/usage';
+/** 外部额度的缓存时间：数字不会秒变，避免每次打开浮层都打接口。 */
+const EXTERNAL_USAGE_TTL_MS = 60000;
+/** 外部额度请求超时。 */
+const EXTERNAL_USAGE_TIMEOUT_MS = 10000;
+/** 兜底遍历时直接跳过的目录名（有 git 时交给 .gitignore，不看这张表）。 */
+const IGNORED_DIRS = new Set([
+	'.git',
+	'node_modules',
+	'dist',
+	'build',
+	'.next',
+	'.venv',
+	'venv',
+	'__pycache__',
+	'target',
+	'coverage',
+	'out',
+	'.cache',
+	'.idea',
+	'.vscode',
+]);
 /** 耗时记录文件的后缀：紧贴会话文件存放，pi 只扫描 *.jsonl，不会把它当会话。 */
 const TIMING_SUFFIX = '.timings.json';
 /** 单个会话最多保留的耗时记录数，超出按写入时间保留最新的。 */
@@ -43,6 +91,16 @@ const UI_ANSWER_TIMEOUT_MS = 10 * 60 * 1000;
 const UI_NOTICE_DEDUPE_MS = 1000;
 /** 标题尾随去抖：有的扩展用动画标题（每十几毫秒改一次），不该每一帧都发到页面。 */
 const UI_TITLE_DEBOUNCE_MS = 800;
+/**
+ * 不转发给页面的插件状态键：有些键在终端状态栏里有意义，在页面里只是噪声。
+ * 默认隐藏 mcp（pi-mcp-adapter 的常驻状态）；PIGUI_HIDE_STATUS 设成空串即全部显示。
+ */
+const HIDDEN_STATUS_KEYS = new Set(
+	String(process.env.PIGUI_HIDE_STATUS ?? 'mcp')
+		.split(',')
+		.map((key) => key.trim().toLowerCase())
+		.filter(Boolean),
+);
 /** 页面文件路径。 */
 const PAGE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'index.html');
 /** 调试开关：打开后转发全部事件，并输出额外日志。 */
@@ -87,6 +145,8 @@ function textOfValue(value, depth = 0) {
 function messageView(message, entryId = '') {
 	const role = typeof message?.role === 'string' ? message.role : 'unknown';
 	const blocks = [];
+	// 图片块的序号（同一条消息里第几张），页面靠它拼 /api/image 的取图地址
+	let imageIndex = 0;
 	if (typeof message?.content === 'string') {
 		blocks.push({ type: 'text', text: message.content });
 	} else if (Array.isArray(message?.content)) {
@@ -97,6 +157,18 @@ function messageView(message, entryId = '') {
 			}
 			if (!raw || typeof raw !== 'object') continue;
 			const type = typeof raw.type === 'string' ? raw.type : 'other';
+			// 图片块只下发取图地址：base64 动辄几 MB，塞进帧会被单帧上限整帧丢掉
+			if (type === 'image') {
+				const mimeType = typeof raw.mimeType === 'string' ? raw.mimeType : '';
+				blocks.push({
+					type: 'image',
+					text: '',
+					mimeType,
+					url: entryId ? `/api/image?entry=${encodeURIComponent(entryId)}&index=${imageIndex}` : '',
+				});
+				imageIndex += 1;
+				continue;
+			}
 			const block = { type, text: textOfValue(raw) };
 			if (raw.arguments !== undefined && raw.arguments !== null) {
 				// 工具参数通常是对象（如 { command: "ls" }），转成 JSON 展示；字符串原样使用。
@@ -139,6 +211,20 @@ function messageView(message, entryId = '') {
 		view.toolCallId = typeof message?.toolCallId === 'string' ? message.toolCallId : '';
 		view.toolName = typeof message?.toolName === 'string' ? message.toolName : '';
 		view.isError = Boolean(message?.isError);
+	}
+	return view;
+}
+
+/**
+ * 给已经定下 entryId 的消息视图补上图片地址（实时回显帧也能显示图片，不必等历史重放）。
+ */
+function attachImageUrls(view) {
+	if (!view || !view.entryId) return view;
+	let index = 0;
+	for (const block of view.blocks ?? []) {
+		if (block?.type !== 'image') continue;
+		if (!block.url) block.url = `/api/image?entry=${encodeURIComponent(view.entryId)}&index=${index}`;
+		index += 1;
 	}
 	return view;
 }
@@ -490,6 +576,8 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		const frame = eventFrame({ type: 'message_end', message });
 		// 查不到 id（极端时序）也照发：退回到“这行暂时不能回退”，不影响消息本身
 		if (frame?.message) frame.message.entryId = resolveEntryId(message);
+		// 条目 id 定下来之后才能给出图片取图地址（实时回显的图片也要能显示）
+		attachImageUrls(frame?.message);
 		broadcast(frame);
 	}
 
@@ -553,6 +641,165 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 	/** 当前会话的插件加载错误（只留前几条，页面提示用）。 */
 	let pluginErrors = [];
 
+	/** 当前会话的用量快照；老版本 SDK 没有统计入口时返回 null。 */
+	function usageInfo(session = active?.session) {
+		if (typeof session?.getSessionStats !== 'function') return null;
+		const stats = session.getSessionStats() ?? {};
+		const tokens = stats.tokens ?? {};
+		const context =
+			typeof session.getContextUsage === 'function' ? session.getContextUsage() : stats.contextUsage;
+		// null / undefined 不能当成 0（上下文百分比在压缩后就是 null，当成 0 会显示成 0%）
+		const number = (value) =>
+			value === null || value === undefined ? 0 : Number.isFinite(Number(value)) ? Number(value) : 0;
+		const nullable = (value) =>
+			value === null || value === undefined ? null : Number.isFinite(Number(value)) ? Number(value) : null;
+		return {
+			input: number(tokens.input),
+			output: number(tokens.output),
+			cacheRead: number(tokens.cacheRead),
+			cacheWrite: number(tokens.cacheWrite),
+			total: number(tokens.total),
+			cost: number(stats.cost),
+			// 上下文占用：tokens / percent 在压缩后到下次响应前可能是 null，页面按未知处理
+			context: context
+				? {
+						tokens: nullable(context.tokens),
+						contextWindow: nullable(context.contextWindow),
+						percent: nullable(context.percent),
+					}
+				: null,
+		};
+	}
+
+	/** 广播用量帧（页面输入区下方那一行）。 */
+	function broadcastUsage() {
+		broadcast({ kind: 'usage', usage: usageInfo() });
+	}
+
+	/** 用量帧的节流句柄：一串事件只算一次。 */
+	let usageTimer = 0;
+
+	/** 攒一拍再算用量：一个回合里会有多条消息与工具结果，没必要逐个重算。 */
+	function scheduleUsage() {
+		if (usageTimer) return;
+		usageTimer = setTimeout(() => {
+			usageTimer = 0;
+			broadcastUsage();
+		}, USAGE_THROTTLE_MS);
+	}
+
+	/* ---------- 速率采样（输出 tokens / 秒） ---------- */
+
+	/** 当前这波输出：{ tokens, source, samples: [{at, tokens}], lastEventAt, lastSentAt, timer }。 */
+	let rateRun = null;
+
+	/** 从 message_update 事件里取输出 tokens：provider 报的优先，退化到 SDK 的估算。 */
+	function rateTokens(event) {
+		const partial = event?.assistantMessageEvent?.partial;
+		if (!partial) return null;
+		const provider = Number(partial.usage?.output);
+		if (Number.isFinite(provider) && provider > 0) return { tokens: provider, source: 'provider' };
+		if (typeof sdk.estimateTokens === 'function') {
+			const estimated = Number(sdk.estimateTokens(partial));
+			if (Number.isFinite(estimated) && estimated > 0) return { tokens: estimated, source: 'estimate' };
+		}
+		return null;
+	}
+
+	/** 窗口内的实时速率；窗口太短或没有增量就不给值。 */
+	function rateLive() {
+		const samples = rateRun?.samples ?? [];
+		if (samples.length < 2) return null;
+		const first = samples[0];
+		const last = samples[samples.length - 1];
+		const ms = last.at - first.at;
+		if (ms < RATE_MIN_ELAPSED_MS) return null;
+		const delta = last.tokens - first.tokens;
+		if (delta <= 0) return null;
+		return Math.round((delta / ms) * 10000) / 10;
+	}
+
+	/** 算并广播一帧实时速率。 */
+	function emitRate() {
+		if (!rateRun) return;
+		rateRun.lastSentAt = Date.now();
+		broadcast({ kind: 'rate', phase: 'live', live: rateLive(), output: rateRun.tokens });
+	}
+
+	/** 每拍重算窗口；静下来就停表。 */
+	function tickRate() {
+		if (!rateRun) return;
+		if (Date.now() - rateRun.lastEventAt > RATE_QUIET_MS) {
+			stopRateTimer();
+			broadcast({ kind: 'rate', phase: 'idle', live: null });
+			return;
+		}
+		emitRate();
+	}
+
+	/** 开一波新的输出采样（助手消息开始）。 */
+	function rateStart() {
+		stopRateTimer();
+		rateRun = { tokens: 0, source: '', samples: [], lastEventAt: Date.now(), lastSentAt: 0, timer: null };
+		rateRun.timer = setInterval(tickRate, RATE_TICK_MS);
+	}
+
+	/** 收到一段输出：推进滑动窗口，并按 RATE_TICK_MS 节流发给页面。 */
+	function rateUpdate(event) {
+		const snapshot = rateTokens(event);
+		if (!snapshot) return;
+		if (!rateRun) rateStart();
+		// provider 的 usage 比估算可信；数字回退说明是新的一次调用，窗口重开
+		const regressed = snapshot.tokens < rateRun.tokens;
+		if (snapshot.source === 'provider' && (rateRun.source !== 'provider' || regressed)) {
+			rateRun.samples = [];
+			rateRun.source = 'provider';
+			rateRun.tokens = snapshot.tokens;
+		} else if (snapshot.source === 'provider' || rateRun.source !== 'provider') {
+			rateRun.tokens = Math.max(rateRun.tokens, snapshot.tokens);
+		}
+		const now = Date.now();
+		rateRun.lastEventAt = now;
+		const last = rateRun.samples[rateRun.samples.length - 1];
+		if (!last || last.tokens !== rateRun.tokens) rateRun.samples.push({ at: now, tokens: rateRun.tokens });
+		const cutoff = now - RATE_WINDOW_MS;
+		while (rateRun.samples.length > 1 && rateRun.samples[1].at < cutoff) rateRun.samples.shift();
+		if (now - rateRun.lastSentAt >= RATE_TICK_MS) emitRate();
+	}
+
+	/** 一次模型调用结束：定格这次调用的平均速率（耗时用实测值）。 */
+	function rateEnd(message, durationMs) {
+		const run = rateRun;
+		stopRateTimer();
+		rateRun = null;
+		const providerOutput = Number(message?.usage?.output);
+		const output = Number.isFinite(providerOutput) && providerOutput > 0 ? providerOutput : (run?.tokens ?? 0);
+		const ms = Number(durationMs);
+		const average =
+			Number.isFinite(ms) && ms >= RATE_MIN_ELAPSED_MS && output > 0 ? Math.round((output / ms) * 10000) / 10 : null;
+		broadcast({
+			kind: 'rate',
+			phase: 'end',
+			average,
+			output,
+			ms: Number.isFinite(ms) ? Math.round(ms) : null,
+		});
+	}
+
+	/** 停掉速率定时器，但保留当前采样。 */
+	function stopRateTimer() {
+		if (rateRun?.timer) clearInterval(rateRun.timer);
+		if (rateRun) rateRun.timer = null;
+	}
+
+	/** 会话切换 / 回合被中断：把速率收尾，别让页面停在旧值上。 */
+	function rateReset() {
+		if (!rateRun) return;
+		stopRateTimer();
+		rateRun = null;
+		broadcast({ kind: 'rate', phase: 'idle', live: null });
+	}
+
 	/** 当前会话的可公开信息。 */
 	function sessionInfo() {
 		const session = active?.session;
@@ -568,6 +815,8 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			thinkingLevel: session?.thinkingLevel ?? null,
 			thinkingLevels: availableThinkingLevels(session),
 			busy,
+			// 用量快照（输入/输出/缓存/费用/上下文占用），页面输入区下方那一行
+			usage: usageInfo(session),
 			// 正在跑的回合：页面刷新/重连后据此接着跳回合计时
 			turn: currentTurnInfo(),
 			// 插件是否拿到了可交互的界面（老版本 SDK 没有 bindExtensions、或启动时关了插件界面时为 false）
@@ -752,7 +1001,10 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				pushUI({ phase: 'notice', level: type === 'warning' || type === 'error' ? type : 'info', message: String(message ?? '') }),
 			// 页面里的输入框只接受完整文本，不支持逐键拦截
 			onTerminalInput: () => () => {},
-			setStatus: (key, text) => pushUI({ phase: 'status', key: String(key), text: text === undefined ? null : String(text) }),
+			setStatus: (key, text) => {
+				if (HIDDEN_STATUS_KEYS.has(String(key).trim().toLowerCase())) return;
+				pushUI({ phase: 'status', key: String(key), text: text === undefined ? null : String(text) });
+			},
 			setWorkingMessage: () => {},
 			setWorkingVisible: () => {},
 			setWorkingIndicator: () => {},
@@ -844,6 +1096,7 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		// 换会话前先把旧会话手上的对话框交回（否则那些 Promise 永远不会被 resolve）、
 		// 把耗时的最后一批落盘、挂着的标题补发、攒着的回显帧补发（都依赖 active，必须在替换前调用）
 		settleAllUI();
+		rateReset();
 		flushTitle();
 		flushUserEcho();
 		flushTimings();
@@ -863,18 +1116,28 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			sessionStartEvent: { type: 'session_start', reason: sessionPath || mode === 'continue' ? 'resume' : 'new' },
 		});
 		const unsubscribe = session.subscribe((event) => {
-			if (event?.type === 'agent_start') busy = true;
-			if (event?.type === 'agent_settled') busy = false;
-			// 计时和转发在同一个回调里做：实测耗时随这一条 message 帧一起下发
-			if (event?.type === 'message_end' && event.message?.role === 'user') {
+			const type = event?.type;
+			if (type === 'agent_start') busy = true;
+			if (type === 'agent_settled') busy = false;
+			// 速率采样只关心助手输出的开始 / 增量 / 结束
+			if (type === 'message_start' && event.message?.role === 'assistant') rateStart();
+			else if (type === 'message_update' && event.message?.role === 'assistant') rateUpdate(event);
+			// 用量会变的时点：攒一拍再算（getSessionStats 要遍历整个会话）
+			if (type === 'turn_end' || (type === 'message_end' && event.message?.role !== 'user')) scheduleUsage();
+			if (type === 'message_end' && event.message?.role === 'user') {
 				// 用户消息回显要等写库后才能取条目 id，先攒起来
 				trackTiming(event);
 				deferUserEcho(event.message);
 				return;
 			}
+			const extra = trackTiming(event);
+			// 助手这一条模型调用结束：定格平均速率（durationMs 就是同一份实测耗时）
+			if (type === 'message_end' && event.message?.role === 'assistant') rateEnd(event.message, extra?.durationMs);
+			// 回合收尾（中止、报错、正常结束都要经过这里）：实时速率不再有效
+			if (type === 'agent_settled') rateReset();
 			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
 			flushUserEcho();
-			broadcast(eventFrame(event, trackTiming(event)));
+			broadcast(eventFrame(event, extra));
 		});
 		active = { session, unsubscribe };
 		busy = false;
@@ -931,6 +1194,325 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		return text;
 	}
 
+	/**
+	 * 校验请求体里的图片附件。
+	 * 返回 { images }（没有附件时为 undefined）或 { error }（页面直接提示）。
+	 */
+	function parseImages(body) {
+		const list = body?.images;
+		if (list === undefined || list === null) return { images: undefined };
+		if (!Array.isArray(list)) return { error: 'images 必须是数组' };
+		if (list.length > MAX_ATTACH_IMAGES) return { error: `一次最多发送 ${MAX_ATTACH_IMAGES} 张图片` };
+		const images = [];
+		for (const item of list) {
+			const data = typeof item?.data === 'string' ? item.data : '';
+			const mimeType = typeof item?.mimeType === 'string' ? item.mimeType.trim().toLowerCase() : '';
+			if (!data) return { error: '图片数据为空' };
+			if (!IMAGE_MIME_TYPES.has(mimeType)) return { error: `不支持的图片类型：${mimeType || '(空)'}` };
+			// byteLength 按 base64 解码后的长度算，避免拿 base64 长度当字节数
+			if (Buffer.byteLength(data, 'base64') > MAX_IMAGE_BYTES) {
+				return { error: `单张图片不能超过 ${Math.round(MAX_IMAGE_BYTES / 1024 / 1024)}MB` };
+			}
+			images.push({ type: 'image', data, mimeType });
+		}
+		return { images: images.length ? images : undefined };
+	}
+
+	/* ---------- 工作目录文件索引（@ 引用文件用） ---------- */
+
+	/** 文件索引缓存：{ at, files, dirs }；@ 每敲一个字都会查一次。 */
+	let fileIndexCache = null;
+
+	/** 列出工作目录里的文件（相对 cwd、POSIX 分隔符）；带缓存。 */
+	async function workspaceIndex() {
+		if (fileIndexCache && Date.now() - fileIndexCache.at < FILE_INDEX_TTL_MS) return fileIndexCache;
+		const files = (await gitFileList()) ?? (await walkFileList());
+		fileIndexCache = { at: Date.now(), files, dirs: dirsOfFiles(files) };
+		return fileIndexCache;
+	}
+
+	/** 试 `git ls-files`：顺带遵守 .gitignore；返回 null 表示不可用（非仓库 / 没装 git / 超时）。 */
+	function gitFileList() {
+		return new Promise((resolve) => {
+			execFile(
+				'git',
+				['ls-files', '-co', '--exclude-standard', '-z'],
+				{ cwd, maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+				(err, stdout) => {
+					if (err) return resolve(null);
+					const files = String(stdout).split('\0').filter(Boolean);
+					resolve(files.length ? files.slice(0, FILE_INDEX_MAX) : null);
+				},
+			);
+		});
+	}
+
+	/** 兜底遍历：没有 git 时用，跳过 IGNORED_DIRS 与文件数上限之外的内容。 */
+	async function walkFileList() {
+		const files = [];
+		const walk = async (dir) => {
+			if (files.length >= FILE_INDEX_MAX) return;
+			let entries;
+			try {
+				entries = await fs.promises.readdir(dir, { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (files.length >= FILE_INDEX_MAX) return;
+				const full = path.join(dir, entry.name);
+				if (entry.isDirectory()) {
+					if (IGNORED_DIRS.has(entry.name)) continue;
+					await walk(full);
+					continue;
+				}
+				if (!entry.isFile()) continue;
+				files.push(path.relative(cwd, full).split(path.sep).join('/'));
+			}
+		};
+		await walk(cwd);
+		return files;
+	}
+
+	/** 由文件列表推出目录集合，让 @ 列表里也能选中目录往下钻。 */
+	function dirsOfFiles(files) {
+		const dirs = new Set();
+		for (const file of files) {
+			let index = file.lastIndexOf('/');
+			while (index > 0) {
+				dirs.add(file.slice(0, index));
+				index = file.lastIndexOf('/', index - 1);
+			}
+		}
+		return [...dirs];
+	}
+
+	/** 按查询串过滤索引：路径前缀 > basename 前缀 > basename 含 > 路径含，目录优先。 */
+	function searchWorkspaceFiles(index, query) {
+		const needle = query.trim().toLowerCase().replace(/^\.\//, '');
+		const candidates = [
+			...index.dirs.map((dir) => ({ path: dir, dir: true })),
+			...index.files.map((file) => ({ path: file, dir: false })),
+		];
+		if (!needle) {
+			// 刚打一个 @：按层级从浅到深给，先让用户看到顶层条目
+			return candidates
+				.sort(
+					(a, b) =>
+						a.path.split('/').length - b.path.split('/').length ||
+						a.path.length - b.path.length ||
+						a.path.localeCompare(b.path),
+				)
+				.slice(0, FILE_SEARCH_LIMIT);
+		}
+		const ranked = [];
+		for (const item of candidates) {
+			const lower = item.path.toLowerCase();
+			const slash = lower.lastIndexOf('/');
+			const base = slash >= 0 ? lower.slice(slash + 1) : lower;
+			let rank = -1;
+			if (lower.startsWith(needle)) rank = 0;
+			else if (base.startsWith(needle)) rank = 1;
+			else if (base.includes(needle)) rank = 2;
+			else if (lower.includes(needle)) rank = 3;
+			if (rank < 0) continue;
+			ranked.push({ item, rank, tier: item.dir ? 0 : 1 });
+		}
+		ranked.sort(
+			(a, b) =>
+				a.rank - b.rank ||
+				a.tier - b.tier ||
+				a.item.path.length - b.item.path.length ||
+				a.item.path.localeCompare(b.item.path),
+		);
+		return ranked.slice(0, FILE_SEARCH_LIMIT).map((entry) => entry.item);
+	}
+
+	/**
+	 * 取当前会话里某条消息的第 index 张图片（页面历史回显用）。
+	 * 被回退移出上下文的旧分支不在 projection 里，取不到就返回 null。
+	 */
+	function findSessionImage(entryId, index) {
+		if (!entryId || index < 0) return null;
+		const manager = active?.session?.sessionManager;
+		if (typeof manager?.buildSessionProjection !== 'function') return null;
+		for (const entry of manager.buildSessionProjection()?.entries ?? []) {
+			if ((entry?.sourceEntry?.id ?? '') !== entryId) continue;
+			let seen = 0;
+			for (const message of entry?.messages ?? []) {
+				if (!Array.isArray(message?.content)) continue;
+				for (const block of message.content) {
+					if (block?.type !== 'image') continue;
+					if (seen === index) {
+						return typeof block.data === 'string' && block.data
+							? { data: block.data, mimeType: typeof block.mimeType === 'string' ? block.mimeType : '' }
+							: null;
+					}
+					seen += 1;
+				}
+			}
+			return null;
+		}
+		return null;
+	}
+
+	/* ---------- 外部额度（Codex 账号额度 / OpenCode Go 套餐用量） ---------- */
+
+	/** 外部额度缓存：{ at, value }，TTL 内直接复用。 */
+	let externalUsageCache = null;
+
+	/** 把窗口秒数说成人话：5小时 / 7天。 */
+	function windowLabel(seconds) {
+		if (seconds % 604800 === 0) return `${seconds / 604800}周`;
+		if (seconds % 86400 === 0) return `${seconds / 86400}天`;
+		if (seconds % 3600 === 0) return `${seconds / 3600}小时`;
+		if (seconds % 60 === 0) return `${seconds / 60}分钟`;
+		return `${Math.round(seconds)}秒`;
+	}
+
+	/** 从 pi 的凭据里取某个 provider 的 key / access token（取不到或出错都返回空串）。 */
+	async function providerKey(providerId) {
+		const runtime = active?.session?.modelRuntime;
+		if (typeof runtime?.getAuth === 'function') {
+			try {
+				// 走 ModelRuntime 的好处：OAuth 过期时由 pi 自己刷新
+				const resolved = await runtime.getAuth(providerId);
+				const key = resolved?.auth?.apiKey ?? resolved?.auth?.key ?? resolved?.auth?.access;
+				if (typeof key === 'string' && key) return key;
+			} catch {
+				/* 落到下面的文件读取 */
+			}
+		}
+		// 兜底：直接从 pi 的 auth.json 读一次（老版本 SDK 没有 getAuth，或 provider 不在模型目录里）
+		try {
+			if (typeof sdk.readStoredCredential !== 'function') return '';
+			const credential = sdk.readStoredCredential(providerId);
+			const key = credential?.apiKey ?? credential?.key ?? credential?.access;
+			return typeof key === 'string' ? key : '';
+		} catch {
+			return '';
+		}
+	}
+
+	/** 带超时的 JSON GET；非 2xx 与超时都抛错，由调用方转成简短原因。 */
+	async function fetchJson(url, headers) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), EXTERNAL_USAGE_TIMEOUT_MS);
+		try {
+			const response = await fetch(url, { method: 'GET', headers, signal: controller.signal });
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			return await response.json();
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	/** 失败原因只留一句短的，不要把响应体或凭据带出来。 */
+	function shortError(err) {
+		const message = String(err?.message ?? err);
+		if (/abort/i.test(message)) return '请求超时';
+		return message.slice(0, 120);
+	}
+
+	/** 解 Codex access token 里的账号 id（JWT 的 chatgpt_account_id）。 */
+	function decodeCodexAccountId(token) {
+		try {
+			const part = String(token).split('.')[1];
+			if (!part) return '';
+			const json = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+			const id = json?.['https://api.openai.com/auth']?.chatgpt_account_id;
+			return typeof id === 'string' ? id : '';
+		} catch {
+			return '';
+		}
+	}
+
+	/** 把 wham/usage 的返回压成可展示的窗口列表（口径与 codex-usage 扩展一致）。 */
+	function parseCodexQuota(payload) {
+		const rateLimit = payload?.rate_limit && typeof payload.rate_limit === 'object' ? payload.rate_limit : {};
+		const windows = [];
+		for (const key of ['primary_window', 'secondary_window']) {
+			const window = rateLimit[key];
+			if (!window || typeof window !== 'object') continue;
+			const seconds = Number(window.limit_window_seconds);
+			const usedPercent = Number(window.used_percent);
+			if (!Number.isFinite(seconds) || seconds <= 0) continue;
+			if (!Number.isFinite(usedPercent)) continue;
+			const resetAt = Number(window.reset_at);
+			windows.push({
+				label: windowLabel(seconds),
+				seconds,
+				remainingPercent: Math.max(0, Math.min(100, 100 - usedPercent)),
+				resetAt: Number.isFinite(resetAt) && resetAt > 0 ? resetAt * 1000 : null,
+			});
+		}
+		windows.sort((a, b) => a.seconds - b.seconds);
+		const credits = payload?.credits && typeof payload.credits === 'object' ? payload.credits : null;
+		let creditsText = '';
+		if (credits?.unlimited === true) creditsText = '∞';
+		else if (credits?.has_credits !== false && credits?.balance !== undefined && credits?.balance !== null) {
+			const balance = String(credits.balance).trim();
+			if (balance) creditsText = balance.startsWith('$') ? balance : `$${balance}`;
+		}
+		return { windows, credits: creditsText, limitReached: rateLimit.limit_reached === true };
+	}
+
+	/** Codex 账号额度：5 小时 / 7 天窗口的剩余百分比、重置时间与可用额度。 */
+	async function fetchCodexQuota() {
+		const token = await providerKey('openai-codex');
+		if (!token) return { ok: false, error: '未登录 openai-codex' };
+		const headers = { accept: 'application/json', authorization: `Bearer ${token}`, 'user-agent': 'pigui' };
+		const accountId = decodeCodexAccountId(token);
+		if (accountId) headers['chatgpt-account-id'] = accountId;
+		try {
+			return { ok: true, ...parseCodexQuota(await fetchJson(CODEX_USAGE_URL, headers)), fetchedAt: Date.now() };
+		} catch (err) {
+			return { ok: false, error: shortError(err) };
+		}
+	}
+
+	/** OpenCode Go 套餐用量：rolling / weekly / monthly 三个窗口的**已用**百分比。 */
+	async function fetchOpencodeGoUsage() {
+		const key = await providerKey('opencode-go');
+		if (!key) return { ok: false, error: '未登录 opencode-go' };
+		try {
+			const payload = await fetchJson(OPENCODE_GO_USAGE_URL, {
+				accept: 'application/json',
+				authorization: `Bearer ${key}`,
+				'user-agent': 'pigui',
+			});
+			const usage = payload?.usage && typeof payload.usage === 'object' ? payload.usage : {};
+			const labels = { rolling: '滚动窗口', weekly: '本周', monthly: '本月' };
+			const windows = [];
+			for (const name of ['rolling', 'weekly', 'monthly']) {
+				const raw = usage[name];
+				if (!raw || typeof raw !== 'object') continue;
+				const used = Number(raw.percent);
+				windows.push({
+					key: name,
+					label: labels[name],
+					usedPercent: Number.isFinite(used) ? Math.max(0, Math.min(100, used)) : null,
+					status: typeof raw.status === 'string' ? raw.status : '',
+					resetsAt: typeof raw.resetsAt === 'string' ? raw.resetsAt : null,
+				});
+			}
+			return { ok: true, windows, fetchedAt: Date.now() };
+		} catch (err) {
+			return { ok: false, error: shortError(err) };
+		}
+	}
+
+	/** 取外部额度（60 秒缓存）；refresh 为真时强制重取。两个请求并行，各自降级。 */
+	async function getExternalUsage(refresh = false) {
+		if (!refresh && externalUsageCache && Date.now() - externalUsageCache.at < EXTERNAL_USAGE_TTL_MS) {
+			return externalUsageCache.value;
+		}
+		const [codex, opencode] = await Promise.all([fetchCodexQuota(), fetchOpencodeGoUsage()]);
+		const value = { fetchedAt: Date.now(), codex, opencode };
+		externalUsageCache = { at: Date.now(), value };
+		return value;
+	}
+
 	const server = http.createServer(async (req, res) => {
 		const url = new URL(req.url ?? '/', 'http://127.0.0.1');
 		const route = `${req.method} ${url.pathname}`;
@@ -983,6 +1565,31 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				return send(res, 200, { sessions }, { 'content-type': 'application/json' });
 			}
 
+			// 外部额度（Codex 账号额度 / OpenCode Go 套餐用量）：按需拉取，60 秒缓存
+			if (route === 'GET /api/usage/external') {
+				const refresh = url.searchParams.get('refresh') === '1';
+				return send(res, 200, await getExternalUsage(refresh), { 'content-type': 'application/json' });
+			}
+
+			// @ 引用文件：只下发相对路径，不读文件内容
+			if (route === 'GET /api/files') {
+				const index = await workspaceIndex();
+				const files = searchWorkspaceFiles(index, url.searchParams.get('q') ?? '');
+				return send(res, 200, { cwd, files }, { 'content-type': 'application/json' });
+			}
+
+			// 历史消息里的图片：按 entryId + 序号从当前会话投影里取原图
+			if (route === 'GET /api/image') {
+				const entryId = url.searchParams.get('entry') ?? '';
+				const index = Math.max(0, Number.parseInt(url.searchParams.get('index') ?? '0', 10) || 0);
+				const image = findSessionImage(entryId, index);
+				if (!image) {
+					return send(res, 404, { error: '图片不存在或已不在当前上下文里' }, { 'content-type': 'application/json' });
+				}
+				const mimeType = IMAGE_MIME_TYPES.has(image.mimeType) ? image.mimeType : 'application/octet-stream';
+				return send(res, 200, Buffer.from(image.data, 'base64'), { 'content-type': mimeType });
+			}
+
 			if (route === 'GET /api/events') {
 				res.writeHead(200, {
 					'content-type': 'text/event-stream; charset=utf-8',
@@ -1015,21 +1622,25 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			if (route === 'POST /api/prompt') {
 				const body = await readJson(req);
 				const text = messageText(body);
-				if (!text) return send(res, 400, { error: '消息为空' }, { 'content-type': 'application/json' });
+				// 附件里的图片随消息一起发给 pi（缩放、校验由 pi 自己做）
+				const parsed = parseImages(body);
+				if (parsed.error) return send(res, 400, { error: parsed.error }, { 'content-type': 'application/json' });
+				const images = parsed.images;
+				if (!text && !images) return send(res, 400, { error: '消息为空' }, { 'content-type': 'application/json' });
 				if (!active) await boot();
 				const forceSteer = body?.mode === 'steer';
 				if (busy || forceSteer) {
-					await active.session.steer(text);
+					await active.session.steer(text, images);
 					return send(res, 202, { accepted: true, mode: 'steer' }, { 'content-type': 'application/json' });
 				}
 				void active.session
-					.prompt(text)
+					.prompt(text, { images })
 					.catch(async (err) => {
 						const message = String(err?.message ?? err);
 						// 运行中直接 prompt 会被拒绝，这里兜底改成 steer，避免消息丢失
 						if (/stream|busy|running|in progress|steer/i.test(message)) {
 							try {
-								await active.session.steer(text);
+								await active.session.steer(text, images);
 								return;
 							} catch {}
 						}
@@ -1041,9 +1652,11 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 			if (route === 'POST /api/steer') {
 				const body = await readJson(req);
 				const text = messageText(body);
-				if (!text) return send(res, 400, { error: '消息为空' }, { 'content-type': 'application/json' });
+				const parsed = parseImages(body);
+				if (parsed.error) return send(res, 400, { error: parsed.error }, { 'content-type': 'application/json' });
+				if (!text && !parsed.images) return send(res, 400, { error: '消息为空' }, { 'content-type': 'application/json' });
 				if (!active) await boot();
-				await active.session.steer(text);
+				await active.session.steer(text, parsed.images);
 				return send(res, 202, { accepted: true }, { 'content-type': 'application/json' });
 			}
 
@@ -1105,6 +1718,8 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 				if (active) await active.session.abort();
 				// 中止后有的插件还挂在对话框上（没传 AbortSignal 的那种），不放开它们这个回合就结束不了
 				settleAllUI();
+				// 中止不一定走到 agent_settled：实时速率在这里直接收尾
+				rateReset();
 				return send(res, 202, { aborted: true }, { 'content-type': 'application/json' });
 			}
 
@@ -1211,6 +1826,8 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 		settleAllUI();
 		cancelUIGrace();
 		if (uiTitleTimer) clearTimeout(uiTitleTimer);
+		if (usageTimer) clearTimeout(usageTimer);
+		stopRateTimer();
 		flushUserEcho();
 		flushTimings();
 		for (const client of clients) {
