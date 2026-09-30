@@ -183,7 +183,8 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 				const main = document.createElement('span');
 				main.className = 'main';
 				const title = document.createElement('span');
-				title.className = 'title';
+				// 选项常带一句说明，select 允许换行（confirm 只有“确认 / 取消”，保持单行）
+				title.className = item.method === 'select' ? 'title clamp-3' : 'title';
 				title.textContent = String(option);
 				title.title = String(option);
 				main.append(title);

@@ -126,6 +126,14 @@
 	-webkit-box-orient: vertical;
 	white-space: normal;
 }
+/* 插件选项常在自己的文案里带说明，允许最多三行（长路径之类也在词内断开） */
+.picker-item .title.clamp-3 {
+	display: -webkit-box;
+	-webkit-line-clamp: 3;
+	-webkit-box-orient: vertical;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
 .picker-item .meta {
 	display: flex;
 	align-items: center;
@@ -405,13 +413,36 @@
 }
 
 /* ---------- 插件对话框与状态（扩展 UI） ---------- */
+/* 插件对话框的标题常是整段提问：只占两行，键位提示与关闭按钮不被挤成竖排 */
+#uiOverlay .picker-head {
+	align-items: flex-start;
+}
+#uiOverlay .picker-head-right {
+	flex: none;
+	padding-top: 1px;
+}
+#uiOverlay .picker-key {
+	white-space: nowrap;
+}
+#uiOverlay .picker-title {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+	line-height: 1.35;
+}
 .ui-message {
 	margin: 0;
-	padding: 12px var(--sheet-pad-x) 4px;
+	padding: 12px var(--sheet-pad-x) 10px;
 	font-size: 13px;
 	line-height: 1.6;
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
+}
+/* 问题本身可能很长：自己滚动，不把下面的选项挤出视口 */
+#uiOverlay .ui-message {
+	max-height: 34vh;
+	overflow-y: auto;
 }
 .ui-message[hidden] {
 	display: none;
