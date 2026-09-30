@@ -1,0 +1,9 @@
+{
+  "name": "pigui",
+  "version": "0.1.0",
+  "description": "Web chat UI for pi: a local server that opens the current worktree's session in the browser",
+  "bin": {
+    "pigui": "./pigui.mjs"
+  },
+  "files": ["pigui.mjs", "server.mjs", "index.html", "backend", "web", "README.md"]
+}

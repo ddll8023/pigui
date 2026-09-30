@@ -7,14 +7,14 @@
 ## 安装（跨机器）
 
 ```bash
-npm i -g github:ddll8023/pi-extensions
+npm i -g github:ddll8023/pigui
 ```
 
 npm 会生成 `pigui` / `pigui.cmd` / `pigui.ps1` 三个入口，之后在任意目录可直接执行 `pigui`。
 
-这个 npm 包只包含 `pigui/`（打包根 `package.json` 的 `files` 只列了它），所以安装只多一个 `pigui` 命令；同一个仓库里那 5 个 pi 扩展由 `pi install git:github.com/ddll8023/pi-extensions` 提供，两条路互不影响，也不能互相代替。
+这个 npm 包就是 pigui 本身（只含它自己的文件）：装完只会多一个 `pigui` 命令。同作者的 5 个 pi 扩展在 <https://github.com/ddll8023/pi-extensions>，由 `pi install git:github.com/ddll8023/pi-extensions` 安装，两条路互不影响，也不能互相代替。
 
-> 这是**独立的命令行工具**，不是 pi 扩展：`pigui/` 里没有 `index.ts`，所以不会被打包根 `package.json` 的 `pi.extensions`（`./*/index.ts`）加载。
+> 这是**独立的命令行工具**，不是 pi 扩展：仓库里没有 `index.ts`，所以不会被 pi 的 `pi.extensions`（`./*/index.ts`）加载。
 
 ## 用法
 
@@ -313,5 +313,5 @@ pigui 还会往同一个目录写一种自己的周边文件：`<会话文件>.t
 ## 卸载
 
 ```bash
-npm uninstall -g pi-extensions
+npm uninstall -g pigui
 ```
