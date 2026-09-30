@@ -14,7 +14,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 	/** 当前流式思考行：{ row, details, textEl, countEl, text }。 */
 	let thinkingRow = null;
 
-	/** 正在生成的助手消息：正文和思考共用一行，落定时保留行位置及序号。 */
+	/** 正在生成的助手消息：正文和思考共用一行，waiting 持有等待提示，落定时保留行位置及序号。 */
 	let pendingAssistant = null;
 
 	/** toolCallId → 调用记录；跨消息、历史分片保留，仅在清空会话时复位。 */
@@ -567,7 +567,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 	function addBlock(body, block) {
 		const type = block.type || 'other';
 		if (type === 'thinking') {
-			body.append(buildThinkBlock(block.text || '', false));
+			if (String(block.text || '').trim()) body.append(buildThinkBlock(block.text, false));
 			return;
 		}
 		if (type === 'text') {
@@ -636,6 +636,21 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		}
 	}
 
+	/** 助手落定后显示失败、中止或空结果说明；已有输出保留，不把未知结束原因猜成失败。 */
+	function showAssistantOutcome(body, message = {}) {
+		const error = String(message.errorMessage || '').trim();
+		let text = '';
+		if (message.stopReason === 'aborted') text = '响应已中止。' + (error ? ' ' + error : '');
+		else if (message.stopReason === 'error' || error) text = '响应失败：' + (error || '模型未返回具体错误信息。');
+		else if (!body.textContent.trim() && !body.querySelector('.tool-entry, img')) text = '本次响应没有可展示内容。';
+		if (!text) return;
+		const note = document.createElement('div');
+		note.className = 'misc';
+		note.setAttribute('role', message.stopReason === 'error' || (error && message.stopReason !== 'aborted') ? 'alert' : 'status');
+		note.textContent = text;
+		body.append(note);
+	}
+
 	/** 渲染完整历史消息；工具结果只回填，不再追加重复的 TOOL 输出卡。 */
 	function renderMessage(message) {
 		const role = message.role || 'unknown';
@@ -657,6 +672,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (message.skill) addSkillBadge(body, message.skill.name);
 		if (blocks.length) for (const block of blocks) addBlock(body, block);
 		else if (message.text) addBlock(body, { type: 'text', text: message.text });
+		if (role === 'assistant') showAssistantOutcome(body, message);
 		return row;
 	}
 
@@ -677,8 +693,23 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 
 	/** 同一条流式助手消息只创建一个身份行，不因思考与工具切换重复占号。 */
 	function ensurePendingAssistant() {
-		if (!pendingAssistant) pendingAssistant = createMessageRow('assistant', 'PI');
+		if (!pendingAssistant) {
+			pendingAssistant = createMessageRow('assistant', 'PI');
+			const waiting = document.createElement('div');
+			waiting.className = 'misc';
+			waiting.setAttribute('role', 'status');
+			waiting.textContent = '等待模型响应…';
+			pendingAssistant.body.append(waiting);
+			pendingAssistant.waiting = waiting;
+		}
 		return pendingAssistant;
+	}
+
+	/** 有可展示内容或调用结束后移除等待提示；空白增量不会提前清除它。 */
+	function removeAssistantWaiting() {
+		if (!pendingAssistant?.waiting) return;
+		pendingAssistant.waiting.remove();
+		pendingAssistant.waiting = null;
 	}
 
 	/** 为当前正文段创建增量容器：已闭合的块按 Markdown 落定，尾部未闭合部分按字面显示。 */
@@ -732,6 +763,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 
 	/** 思考段按出现顺序放在当前助手正文内，生成时展开，落定后恢复默认折叠。 */
 	function appendThinking(chunk) {
+		if (!thinkingRow && !String(chunk || '').trim()) return;
 		if (!thinkingRow) {
 			const { row, body } = ensurePendingAssistant();
 			const details = buildThinkBlock('', true);
@@ -742,7 +774,9 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		}
 		thinkingRow.text += chunk;
 		thinkingRow.textEl.textContent = thinkingRow.text;
+		thinkingRow.details.querySelector('.sum').textContent = firstLine(thinkingRow.text);
 		thinkingRow.countEl.textContent = thinkingRow.text.length + ' 字';
+		removeAssistantWaiting();
 	}
 
 	/** 开始事件更新既有调用；事件先到时建立记录，稍后按 ID 迁回完整消息。 */
@@ -754,6 +788,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (!entry.hasResult && (entry.state === 'pending' || entry.state === 'unknown')) entry.state = 'running';
 		refreshToolEntry(entry);
 		if (!entry.details.isConnected && pendingAssistant) placeToolEntry(pendingAssistant.body, entry);
+		if (pendingAssistant?.body.contains(entry.details)) removeAssistantWaiting();
 		attachStandaloneTool(entry);
 		flushStreamRender(streaming);
 		streaming = null;
@@ -790,12 +825,14 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		const displaced = [...target.body.querySelectorAll('.tool-entry')].map((node) => node._toolEntry);
 		// 落定改用服务端权威内容重绘，挂起的流式帧不必再跑
 		cancelStreamRender(streaming);
+		removeAssistantWaiting();
 		target.body.replaceChildren();
 		const blocks = Array.isArray(message.blocks) ? message.blocks : [];
 		if (blocks.length) for (const block of blocks) addBlock(target.body, block);
 		else if (message.text) addBlock(target.body, { type: 'text', text: message.text });
 		// 完整消息不含某个临时调用时保留独立记录，不能随重绘一起删除输出。
 		for (const entry of displaced) attachStandaloneTool(entry);
+		showAssistantOutcome(target.body, message);
 		// 单次模型调用耗时：以服务端实测为准，缺了就按本地已经跑过的时间定格
 		settleRowTimer(target.row, message.durationMs);
 		pendingAssistant = null;
@@ -834,6 +871,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (frame.kind === 'delta') {
 			const target = ensureStreaming();
 			target.text += frame.text;
+			if (target.text.trim()) removeAssistantWaiting();
 			scheduleStreamRender(target);
 			return true;
 		}
@@ -878,6 +916,11 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		finishPendingTools();
 		// 中止或回合结束不会再收到完整消息，先把挂起的增量落定
 		flushStreamRender(streaming);
+		if (pendingAssistant) {
+			removeAssistantWaiting();
+			settleRowTimer(pendingAssistant.row, NaN);
+			showAssistantOutcome(pendingAssistant.body);
+		}
 		pendingAssistant = null;
 		streaming = null;
 		thinkingRow = null;

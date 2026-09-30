@@ -142,6 +142,11 @@ export function messageView(message, entryId = '', parseSkill) {
 		.trim();
 	// entryId 是会话树里这条消息所在条目的 id，页面据此定位回退目标；取不到时为空串
 	const view = { role, text, blocks, entryId };
+	// 助手的失败和中止信息不在正文块里，必须单独保留；错误文本同样限制帧大小。
+	if (role === 'assistant') {
+		if (typeof message.stopReason === 'string') view.stopReason = message.stopReason;
+		if (typeof message.errorMessage === 'string') view.errorMessage = message.errorMessage.slice(0, MAX_BLOCK_TEXT);
+	}
 	// 技能消息落盘的是展开后的全文：只下发名称与参数，页面画成徽标 + 参数，
 	// 否则一条提问就能把整份 SKILL.md 铺在气泡里（图片块与取图序号保持不动）。
 	if (role === 'user') {
