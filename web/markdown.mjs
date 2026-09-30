@@ -185,6 +185,29 @@ export function renderMarkdown(text, container) {
 	}
 }
 
+/** 流式渲染的落定边界：返回可整块按 Markdown 渲染的前缀长度。
+    只认围栏外的空行之后与围栏收尾行之后，不去猜半行语法是否写完；
+    返回 0 表示还没有可以落定的块。 */
+export function closedMarkdownLength(text) {
+	const lines = String(text == null ? '' : text).split('\n');
+	let inFence = false;
+	let boundary = 0;
+	let offset = 0;
+	for (let index = 0; index < lines.length; index += 1) {
+		const line = lines[index];
+		// 末尾那个空串只是换行符的副产物，不能当分隔空行用
+		const next = offset + line.length + (index < lines.length - 1 ? 1 : 0);
+		if (/^\s*```/.test(line)) {
+			inFence = !inFence;
+			if (!inFence) boundary = next;
+		} else if (!inFence && index < lines.length - 1 && /^\s*$/.test(line)) {
+			boundary = next;
+		}
+		offset = next;
+	}
+	return boundary;
+}
+
 /** renderMarkdown 的实际实现（异常由调用方兜底）。 */
 function renderMarkdownBlocks(text, container) {
 	const lines = text.split('\n');

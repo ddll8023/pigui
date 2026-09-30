@@ -1,5 +1,5 @@
 /** 消息、流式内容、工具记录和行计时；全部状态随消息区复位。 */
-import { renderMarkdown } from './markdown.mjs';
+import { renderMarkdown, closedMarkdownLength } from './markdown.mjs';
 
 /** 创建消息区；外部只注入运行状态读取和导航刷新操作。 */
 export function createMessages({ isBusy, syncJumpButtons }) {
@@ -8,7 +8,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 	/** 消息序号（只给真正的消息行，状态行不占号）。 */
 	let seq = 0;
 
-	/** 当前流式正文行：{ row, body, text }。 */
+	/** 当前流式正文行：{ row, body, textEl, tailEl, text, rendered, frame }。 */
 	let streaming = null;
 
 	/** 当前流式思考行：{ row, details, textEl, countEl, text }。 */
@@ -98,6 +98,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		messagesEl.replaceChildren();
 		resetTimers();
 		seq = 0;
+		cancelStreamRender(streaming);
 		streaming = null;
 		thinkingRow = null;
 		pendingAssistant = null;
@@ -519,16 +520,53 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		return pendingAssistant;
 	}
 
-	/** 为当前正文段创建纯文本容器，完整消息到达后再按 Markdown 落定。 */
+	/** 为当前正文段创建增量容器：已闭合的块按 Markdown 落定，尾部未闭合部分按字面显示。 */
 	function ensureStreaming() {
 		if (streaming) return streaming;
 		const { row, body } = ensurePendingAssistant();
 		const textEl = document.createElement('div');
-		textEl.className = 'stream-text message-text';
+		textEl.className = 'message-text';
+		const tailEl = document.createElement('div');
+		tailEl.className = 'stream-text';
+		textEl.append(tailEl);
 		body.append(textEl);
-		streaming = { row, body, textEl, text: '' };
+		streaming = { row, body, textEl, tailEl, text: '', rendered: 0, frame: 0 };
 		thinkingRow = null;
 		return streaming;
+	}
+
+	/** 增量落定：新闭合的块渲染后插在尾部之前，尾部只重写纯文本（整体仍是 O(n)）。 */
+	function renderStream(target) {
+		if (!target) return;
+		target.frame = 0;
+		const boundary = closedMarkdownLength(target.text);
+		if (boundary > target.rendered) {
+			const holder = document.createElement('div');
+			renderMarkdown(target.text.slice(target.rendered, boundary), holder);
+			target.tailEl.before(...holder.childNodes);
+			target.rendered = boundary;
+		}
+		target.tailEl.textContent = target.text.slice(target.rendered);
+	}
+
+	/** 同一帧内的多次 delta 合并成一次渲染，不改变服务端的下发节奏。 */
+	function scheduleStreamRender(target) {
+		if (target.frame) return;
+		target.frame = requestAnimationFrame(() => renderStream(target));
+	}
+
+	/** 丢弃挂起帧：内容将被权威重绘代替时不必再渲染。 */
+	function cancelStreamRender(target) {
+		if (!target || !target.frame) return;
+		cancelAnimationFrame(target.frame);
+		target.frame = 0;
+	}
+
+	/** 段落仍在页面上但不再更新：把挂起的增量同步落定，避免最后几个 delta 留在帧里。 */
+	function flushStreamRender(target) {
+		if (!target) return;
+		cancelStreamRender(target);
+		renderStream(target);
 	}
 
 	/** 思考段按出现顺序放在当前助手正文内，生成时展开，落定后恢复默认折叠。 */
@@ -538,6 +576,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			const details = buildThinkBlock('', true);
 			body.append(details);
 			thinkingRow = { row, details, textEl: details.querySelector('.think-text'), countEl: details.querySelector('.count'), text: '' };
+			flushStreamRender(streaming);
 			streaming = null;
 		}
 		thinkingRow.text += chunk;
@@ -554,6 +593,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		refreshToolEntry(entry);
 		if (!entry.details.isConnected && pendingAssistant) placeToolEntry(pendingAssistant.body, entry);
 		attachStandaloneTool(entry);
+		flushStreamRender(streaming);
 		streaming = null;
 		thinkingRow = null;
 	}
@@ -585,6 +625,8 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 	function settleAssistantMessage(message) {
 		const target = ensurePendingAssistant();
 		const displaced = [...target.body.querySelectorAll('.tool-entry')].map((node) => node._toolEntry);
+		// 落定改用服务端权威内容重绘，挂起的流式帧不必再跑
+		cancelStreamRender(streaming);
 		target.body.replaceChildren();
 		const blocks = Array.isArray(message.blocks) ? message.blocks : [];
 		if (blocks.length) for (const block of blocks) addBlock(target.body, block);
@@ -629,7 +671,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (frame.kind === 'delta') {
 			const target = ensureStreaming();
 			target.text += frame.text;
-			target.textEl.textContent = target.text;
+			scheduleStreamRender(target);
 			return true;
 		}
 		if (frame.kind === 'thinking') { appendThinking(frame.text); return true; }
@@ -671,6 +713,8 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			turnTimerRow = null;
 		}
 		finishPendingTools();
+		// 中止或回合结束不会再收到完整消息，先把挂起的增量落定
+		flushStreamRender(streaming);
 		pendingAssistant = null;
 		streaming = null;
 		thinkingRow = null;
