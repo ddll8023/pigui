@@ -599,11 +599,10 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			void addAttachments(files);
 		});
 		inputEl.addEventListener('paste', (event) => {
+			// items 与 files 是同一份剪贴板内容的两种视图，合并会把一张图算两次
 			const items = [...(event.clipboardData?.items ?? [])];
-			const files = [
-				...items.filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter(Boolean),
-				...(event.clipboardData?.files ?? []),
-			];
+			const pasted = items.filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter(Boolean);
+			const files = pasted.length ? pasted : [...(event.clipboardData?.files ?? [])];
 			if (!files.length) return;
 			event.preventDefault();
 			void addAttachments(files);
