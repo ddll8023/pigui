@@ -222,6 +222,21 @@ export function eventFrame(event, extra, parseSkill) {
 	if (event.type === 'thinking_level_changed') {
 		return { kind: 'event', type: event.type, detail: { level: String(event.level ?? '') } };
 	}
+	// 压缩事件只发状态和 token 数，不把长摘要塞进 SSE 帧。
+	if (event.type === 'compaction_start' || event.type === 'compaction_end') {
+		const detail = { reason: String(event.reason ?? '') };
+		if (event.type === 'compaction_end') {
+			detail.aborted = Boolean(event.aborted);
+			if (typeof event.errorMessage === 'string') detail.errorMessage = event.errorMessage.slice(0, MAX_BLOCK_TEXT);
+			if (event.result) {
+				detail.result = {};
+				for (const key of ['tokensBefore', 'estimatedTokensAfter']) {
+					if (Number.isFinite(event.result[key])) detail.result[key] = event.result[key];
+				}
+			}
+		}
+		return { kind: 'event', type: event.type, detail };
+	}
 	const detail = {};
 	for (const key of ['toolName', 'name', 'status', 'reason']) {
 		if (typeof event[key] === 'string') detail[key] = event[key].slice(0, 120);

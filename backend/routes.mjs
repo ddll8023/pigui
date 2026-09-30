@@ -13,17 +13,20 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 	/** SSE 重连时即时读取当前分支，不缓存旧会话历史。 */
 	function currentHistory() { return historyFrames(runtime.currentViews()); }
 
-	/** 重载期间不允许会话修改；插件回答与关闭服务仍由独立入口处理。 */
-	function assertNotReloading() {
+	/** 重载或压缩期间不允许会话修改；插件回答、关闭服务和压缩中止走独立入口。 */
+	function assertSessionMutable() {
 		if (runtime.isReloading()) {
 			throw Object.assign(new Error('资源正在重载，请稍后再试'), { status: 409 });
 		}
+		if (runtime.isCompacting()) {
+			throw Object.assign(new Error('会话正在压缩，请等待结束或先中止'), { status: 409 });
+		}
 	}
 
-	/** 读取会话修改请求；读请求体期间也可能开始重载，因此读完再检查一次。 */
+	/** 读取会话修改请求；读请求体期间也可能开始压缩或重载，读完再检查一次。 */
 	async function readSessionBody(req) {
 		const body = await readJson(req);
-		assertNotReloading();
+		assertSessionMutable();
 		return body;
 	}
 
@@ -34,7 +37,8 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 		try {
 			if (await serveAsset(route, res)) return;
 			if (req.method === 'POST' && route !== 'POST /api/ui-response' && route !== 'POST /api/shutdown') {
-				assertNotReloading();
+				// 保持重载锁的原边界，只在压缩期间放行中止。
+				if (route !== 'POST /api/abort' || runtime.isReloading()) assertSessionMutable();
 			}
 
 			if (route === 'GET /api/context') {
@@ -261,6 +265,29 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				);
 			}
 
+			if (route === 'POST /api/compact') {
+				const body = await readSessionBody(req);
+				if (body?.instructions !== undefined && typeof body.instructions !== 'string') {
+					return send(res, 400, { error: '摘要要求必须是文本' }, { 'content-type': 'application/json' });
+				}
+				try {
+					const result = await runtime.compact(body?.instructions?.trim());
+					return send(res, 200, {
+						result: { tokensBefore: result?.tokensBefore, estimatedTokensAfter: result?.estimatedTokensAfter },
+						context: runtime.sessionInfo(),
+					}, { 'content-type': 'application/json' });
+				} catch (err) {
+					const error = String(err?.message ?? err);
+					if (error === 'Compaction cancelled') {
+						return send(res, 200, { cancelled: true, context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
+					}
+					const status = err?.status === 400 || err?.status === 409 ? err.status
+						: /Already compacted|Nothing to compact/i.test(error) ? 400 : 500;
+					// 手动压缩由发起页面展示 HTTP 结果，不再广播一份重复的全局错误。
+					return send(res, status, { error }, { 'content-type': 'application/json' });
+				}
+			}
+
 			if (route === 'POST /api/reload') {
 				await runtime.reload();
 				return send(res, 200, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
@@ -281,7 +308,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				if (!found) {
 					return send(res, 404, { error: '该会话不属于当前工作目录' }, { 'content-type': 'application/json' });
 				}
-				assertNotReloading();
+				assertSessionMutable();
 				await runtime.switchSession(path.resolve(found.path));
 				return send(res, 202, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
 			}

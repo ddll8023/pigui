@@ -21,6 +21,9 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 资源重载期间禁止重复重载和会话修改，但仍允许页面回答插件对话框。 */
 	let reloading = false;
 
+	/** 手动压缩锁覆盖 SDK 开始压缩前的异步间隙，避免并发请求抢入。 */
+	let manualCompacting = false;
+
 	/** 是否成功给插件绑定了可交互的 UI 上下文（声明放在 sessionInfo 之前，避免暂时性死区）。 */
 	let pluginUiBound = false;
 
@@ -173,6 +176,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			thinkingLevel: session?.thinkingLevel ?? null,
 			thinkingLevels: availableThinkingLevels(session),
 			busy,
+			compacting: isCompacting(),
 			// 用量快照（输入/输出/缓存/费用/上下文占用），页面输入区下方那一行
 			usage: telemetry.usageInfo(session),
 			// 正在跑的回合：页面刷新/重连后据此接着跳回合计时
@@ -269,6 +273,14 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
 			flushUserEcho();
 			broadcast(eventFrame(event, extra, parseSkill));
+			if (type === 'compaction_start') broadcastSession();
+			if (type === 'compaction_end') {
+				telemetry.scheduleUsage();
+				// 自动压缩在 end 事件之后才释放 SDK 状态，下一拍再公布最终上下文。
+				setTimeout(() => {
+					if (active?.session === session) broadcastSession();
+				}, 0);
+			}
 		});
 		active = { session, unsubscribe };
 		busy = false;
@@ -314,13 +326,37 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 读取资源重载锁，供路由拒绝冲突请求。 */
 	function isReloading() { return reloading; }
 
+	/** 手动锁与 SDK 自动压缩状态合并，供路由和页面拒绝冲突操作。 */
+	function isCompacting() { return manualCompacting || Boolean(active?.session?.isCompacting); }
+
+	/** 只在空闲会话上压缩；沿用 SDK 的摘要策略、扩展钩子和会话持久化。 */
+	async function compact(instructions) {
+		const session = active?.session;
+		if (!session || typeof session.compact !== 'function') {
+			throw Object.assign(new Error('当前 pi 版本不支持手动压缩'), { status: 400 });
+		}
+		if (reloading || busy || isCompacting() || session.isStreaming || session.isIdle === false) {
+			throw Object.assign(new Error('会话正在运行、压缩或重载，请等待结束后再压缩'), { status: 409 });
+		}
+		manualCompacting = true;
+		broadcastSession();
+		try {
+			flushUserEcho();
+			return await session.compact(instructions || undefined);
+		} finally {
+			manualCompacting = false;
+			telemetry.scheduleUsage();
+			broadcastSession();
+		}
+	}
+
 	/** 原地重载 SDK 资源；保留会话及事件订阅，不调用 boot 或重放历史。 */
 	async function reload() {
 		const session = active?.session;
 		if (!session || typeof session.reload !== 'function') {
 			throw Object.assign(new Error('当前 pi 版本不支持资源重载'), { status: 400 });
 		}
-		if (reloading || busy || session.isStreaming || session.isCompacting || session.isIdle === false) {
+		if (reloading || busy || session.isStreaming || isCompacting() || session.isIdle === false) {
 			throw Object.assign(new Error('会话正在运行或重载，请等待结束后再重载'), { status: 409 });
 		}
 		reloading = true;
@@ -362,5 +398,5 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		try { active?.session?.dispose(); } catch {}
 	}
 
-	return { getSession, isBusy, isReloading, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
+	return { getSession, isBusy, isReloading, isCompacting, compact, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
 }

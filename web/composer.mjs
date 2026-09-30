@@ -1,7 +1,7 @@
 /** 编辑器、补全与附件发送 */
 
 /** 创建编辑器、补全与附件发送；状态由实例自己维护。 */
-export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
+export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
 	const inputEl = document.getElementById('input');
 	const sendEl = document.getElementById('send');
 	const cmdbarEl = document.getElementById('cmdbar');
@@ -20,6 +20,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		{ name: '/new', desc: '新建会话', kind: 'action' },
 		{ name: '/rewind', desc: '回退到某条提问之前', kind: 'action' },
 		{ name: '/reload', desc: '重载扩展 / 技能 / 提示模板与配置', kind: 'action' },
+		{ name: '/compact', desc: '手动压缩上下文，可附摘要要求', kind: 'action' },
 	];
 
 	/** 服务端列出的可补全命令（技能、提示模板、插件命令）；kind=insert 表示选中只写入输入框。 */
@@ -87,7 +88,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 
 	/** 把命令写成“命令名 + 参数”两段（`/model claude` → `/model` 与 `claude`）。 */
 	function splitCommand(text) {
-		const space = String(text || '').indexOf(' ');
+		const space = String(text || '').search(/\s/);
 		return space > 0
 			? { head: text.slice(0, space), rest: text.slice(space + 1).trim() }
 			: { head: text, rest: '' };
@@ -459,8 +460,36 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		}
 	}
 
+	/** 请求手动压缩，显示结果；不创建用户消息，也不把命令交给模型。 */
+	async function compactContext(instructions) {
+		try {
+			const response = await fetch('/api/compact', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ instructions }),
+			});
+			const data = await response.json();
+			if (!response.ok) throw new Error(data.error || '服务端拒绝压缩');
+			if (data.cancelled) {
+				addStatusRow('压缩已取消');
+				return;
+			}
+			const before = data.result?.tokensBefore;
+			const after = data.result?.estimatedTokensAfter;
+			const tokens = Number.isFinite(before) && Number.isFinite(after)
+				? ` · ${Math.round(before).toLocaleString()} → 约 ${Math.round(after).toLocaleString()} tokens` : '';
+			addStatusRow('压缩完成' + tokens);
+		} catch (err) {
+			addStatusRow('压缩失败：' + String(err?.message || err), 'error');
+		}
+	}
+
 	/** 执行页面内命令：只在本页处理，不会发给模型。 */
 	async function runActionCommand(head, rest) {
+		if (isCompacting()) {
+			addStatusRow('会话正在压缩，请等待结束或先中止', 'error');
+			return;
+		}
 		hideCommands();
 		inputEl.value = '';
 		autoGrow();
@@ -468,6 +497,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		else if (head === '/model') await openModelPicker(rest);
 		else if (head === '/rewind') await openRewind();
 		else if (head === '/reload') await reloadResources();
+		else if (head === '/compact') await compactContext(rest);
 		else await newSession();
 	}
 
@@ -495,7 +525,11 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		const text = inputEl.value.trim();
 		const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
 		if (!text && !images.length) return;
-		// 页面内命令（/resume、/model、/new、/rewind、/reload）只在本页处理，不发给模型；
+		if (isCompacting()) {
+			addStatusRow('会话正在压缩，请等待结束或先中止', 'error');
+			return;
+		}
+		// 页面内命令（/resume、/model、/new、/rewind、/reload、/compact）只在本页处理，不发给模型；
 		// 技能 / 模板 / 插件命令不走这里，原样发送交给 pi 展开。
 		const { head, rest } = splitCommand(text);
 		if (COMMANDS.some((command) => command.name === head)) {

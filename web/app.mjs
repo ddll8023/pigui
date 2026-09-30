@@ -19,6 +19,11 @@ function isBusy() {
 	return stateEl.dataset.busy === 'true';
 }
 
+/** 压缩状态来自会话帧和 SDK 事件；编辑器据此保留未发送内容。 */
+function isCompacting() {
+	return stateEl.dataset.compacting === 'true';
+}
+
 const navigation = createNavigation();
 const messages = createMessages({ isBusy, syncJumpButtons: navigation.syncJumpButtons });
 // 插件和回退只在初始化完成后的交互中写编辑器，通过注入函数避免循环导入。
@@ -59,16 +64,33 @@ composer = createComposer({
 	openModelPicker: models.openModelPicker,
 	openRewind: sessions.openRewind,
 	newSession: sessions.newSession,
+	isCompacting,
 	isSessionPickerOpen: sessions.isPickerOpen,
 	isOverlayOpen,
 	handleOverlayKey,
 });
 
-/** 更新顶栏运行状态，不重绘消息。 */
+/** 按回合和压缩状态更新顶栏；压缩结束不误清仍在执行的自动续跑。 */
+function renderRunState() {
+	const running = stateEl.dataset.agentBusy === 'true';
+	const compacting = isCompacting();
+	stateEl.dataset.busy = running || compacting ? 'true' : 'false';
+	stateEl.querySelector('.label').textContent = compacting ? '压缩中' : running ? '运行中' : '空闲';
+	// 新建会话的旧入口不检查 HTTP 错误，压缩期间禁用按钮，避免误清页面历史。
+	document.getElementById('new').disabled = compacting;
+	document.getElementById('send').disabled = compacting;
+}
+
+/** 更新回合状态，不重绘消息。 */
 function setBusy(next) {
-	const busy = Boolean(next);
-	stateEl.dataset.busy = busy ? 'true' : 'false';
-	stateEl.querySelector('.label').textContent = busy ? '运行中' : '空闲';
+	stateEl.dataset.agentBusy = next ? 'true' : 'false';
+	renderRunState();
+}
+
+/** 同步压缩状态；状态与输入限制共用同一份 DOM 标记。 */
+function setCompacting(next) {
+	stateEl.dataset.compacting = next ? 'true' : 'false';
+	renderRunState();
 }
 
 /** 将会话上下文同步到顶栏和功能模块，不共享可变状态容器。 */
@@ -89,6 +111,7 @@ function renderContext(context) {
 	models.setContext(context);
 	// 技能 / 提示模板 / 插件命令由服务端会话帧给出，页面只把它们并进 `/` 提示条
 	composer.setCommands(context.commands);
+	setCompacting(context.compacting);
 	setBusy(context.busy);
 	plugins.noticePlugins(context);
 	messages.resumeTurn(context);
@@ -119,9 +142,31 @@ function handleFrame(frame) {
 			setBusy(true);
 			return;
 		}
-		if (type === 'agent_end' || type === 'agent_settled') {
+		// agent_end 之后可能还有压缩与恢复重试，以 SDK 的 settled 作为最终空闲边界。
+		if (type === 'agent_end') return;
+		if (type === 'agent_settled') {
 			setBusy(false);
 			messages.finishTurn();
+			return;
+		}
+		if (type === 'compaction_start') {
+			setCompacting(true);
+			messages.addStatusRow(detail.reason === 'manual' ? '正在压缩上下文…' : '正在自动压缩上下文…');
+			return;
+		}
+		if (type === 'compaction_end') {
+			setCompacting(false);
+			// 手动结果由发起命令的 HTTP 请求展示，避免重复通知；自动压缩靠 SSE 展示。
+			if (detail.reason === 'manual') return;
+			if (detail.aborted) messages.addStatusRow('自动压缩已取消');
+			else if (detail.errorMessage) messages.addStatusRow('自动压缩失败：' + detail.errorMessage, 'error');
+			else if (detail.result) {
+				const before = detail.result.tokensBefore;
+				const after = detail.result.estimatedTokensAfter;
+				const tokens = Number.isFinite(before) && Number.isFinite(after)
+					? ` · ${Math.round(before).toLocaleString()} → 约 ${Math.round(after).toLocaleString()} tokens` : '';
+				messages.addStatusRow('自动压缩完成' + tokens);
+			}
 			return;
 		}
 		if (type === 'turn_start') return;

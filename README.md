@@ -57,13 +57,22 @@ pigui
 | `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
 | `/rewind` | 打开回退浮层：列出本会话的每条提问，`↑`/`↓` 移动、`Enter` 回退、`Esc` 关闭，也可以直接点条目（详见下节） |
 | `/reload` | 原地重载扩展、技能、提示模板、配置与上下文文件，更新命令提示条；保留当前会话、历史、模型和思考等级，不重启服务、不刷新页面。运行或压缩期间不能重载；重载期间拒绝其他会话修改，插件对话框仍可回答 |
+| `/compact [摘要要求]` | 手动压缩当前上下文，例如 `/compact 保留接口约定和未完成事项`；沿用 Pi SDK 的摘要策略，完成后显示压缩前后 token 数（压缩后为估算）并同步用量。运行、压缩或重载期间拒绝执行，不中断正在进行的回合 |
 
-打一个 `/` 就会出现命令提示条，候选分两类：上面 5 条**页面命令**，以及服务端列出的**技能**（`/skill:名称`）、**提示模板**（`/模板名`）和**插件注册的命令**。`↑`/`↓` 移动、`Enter` 或 `Tab` 选中，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`、`/rewind`、`/reload`），前缀没有结果时退回子串匹配（`/read` 也能找到 `/skill:code-readability-review`）。输入框失焦或不再以 `/` 开头时提示自动收起。
+打一个 `/` 就会出现命令提示条，候选分两类：上面 6 条**页面命令**，以及服务端列出的**技能**（`/skill:名称`）、**提示模板**（`/模板名`）和**插件注册的命令**。`↑`/`↓` 移动、`Enter` 或 `Tab` 选中，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`、`/rewind`、`/reload`），前缀没有结果时退回子串匹配（`/read` 也能找到 `/skill:code-readability-review`）。输入框失焦或不再以 `/` 开头时提示自动收起。
 
 - **页面命令**：选中即在本页执行，不会发给模型。
 - **技能 / 提示模板 / 插件命令**：选中只把 `/名称 ` 补进输入框（尾部留一个空格好接参数），再按 `Enter` 发送；展开与派发都由 pi 自己完成，页面不读技能文件内容。
 
-只有上面 5 条页面命令会被本页拦截（带参数时按首个词匹配）；`/skill:名称`、`/模板名`、插件命令以及 `/usr/local/bin` 这类以 `/` 开头的普通文本都原样发给 pi，由 pi 决定展开还是当普通文本处理。
+只有上面 6 条页面命令会被本页拦截（带参数时按首个词匹配）；`/skill:名称`、`/模板名`、插件命令以及 `/usr/local/bin` 这类以 `/` 开头的普通文本都原样发给 pi，由 pi 决定展开还是当普通文本处理。
+
+## 上下文压缩
+
+- 自动压缩由 Pi SDK 与全局 / 项目配置控制，pigui 不设置自己的阈值。Pi 0.99.1 默认开启，上下文超过「模型窗口 − 16384 tokens」时压缩旧消息，保留最近约 20000 tokens；模型覆盖配置或扩展钩子可改变默认行为。
+- `/compact` 不会作为用户消息发给模型，也不需要等到自动阈值；可附加摘要要求。关闭自动压缩不影响手动压缩。
+- 页面显示「压缩中」，期间拒绝消息发送、模型 / 思考等级修改、新建 / 切换 / 回退和重载；插件对话框仍可回答，可点「中止」取消。
+- 默认摘要调用当前模型，产生耗时与 token 费用。压缩仅改变后续模型请求的上下文，不删除原始会话记录、不回滚文件。上下文占用百分比在下一次模型响应前可能显示为未知。
+- 会话过小、刚完成压缩、被扩展取消或模型请求失败时会显示对应结果；老 SDK 没有 `session.compact()` 时提示不支持。服务端代码更新后须重启 pigui，`/reload` 不会重新加载服务端代码。
 
 ## 技能
 
@@ -280,14 +289,15 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | POST | `/api/abort` | 中止当前回合 |
 | POST | `/api/model` | `{provider, id, persist?}`；切换模型（默认只改本会话，`persist: true` 同时写全局默认）；不在可用列表内 404，未配鉴权 400 |
 | POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
-| POST | `/api/reload` | 原地重载当前会话的资源，成功返回 `{context}` 并广播 `session`；运行、压缩或重载期间 409，SDK 不支持时 400，其他重载错误 500。清理旧插件对话框、状态、部件和标题，保留会话历史；重载期间其他会话修改请求返回 409，`/api/ui-response` 与 `/api/shutdown` 不受阻止 |
+| POST | `/api/compact` | `{instructions?}`；手动压缩空闲会话，成功返回 `{result: {tokensBefore, estimatedTokensAfter}, context}`；取消返回 `{cancelled: true, context}`。运行、压缩或重载期间 409，SDK 不支持或没有可压缩内容时 400，模型请求失败时 500；摘要要求必须是文本 |
+| POST | `/api/reload` | 原地重载当前会话的资源，成功返回 `{context}` 并广播 `session`；运行、压缩或重载期间 409，SDK 不支持时 400，其他重载错误 500。清理旧插件对话框、状态、部件和标题，保留会话历史；重载期间其他会话修改请求返回 409，`/api/ui-response` 与 `/api/shutdown` 不受阻止；压缩期间同样拒绝会话修改，但额外放行 `/api/abort` |
 | POST | `/api/new` | 新建会话（旧的会被释放） |
 | POST | `/api/switch` | `{sessionFile}`；切换到该目录下的某个会话（不属于该目录则 404） |
 | POST | `/api/rewind` | `{entryId}`；回退到该用户消息节点之前（只接受本会话的用户提问，否则 404；运行中 409；被扩展取消也 409），被放弃的分支既不删除也不总结；成功返回 `{editorText, context}`（这条提问由技能展开时，`editorText` 还原成 `/skill:名称 参数`） |
 | POST | `/api/ui-response` | `{id, value \| confirmed \| cancelled}`；回答插件对话框（同 pi RPC 协议的三种形态）；id 已结束或不存在时 404 |
 | POST | `/api/shutdown` | 关闭服务 |
 
-SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`/命令表 `commands`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`/`reset`（重载时清理旧插件界面））、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
+SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/compacting/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`/命令表 `commands`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`/`reset`（重载时清理旧插件界面））、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`，以及 `compaction_start` / `compaction_end` 的原因、取消 / 失败信息和压缩前后 token 数（不含摘要全文）；单帧过大时降级为 `frame_truncated`）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）。
 
