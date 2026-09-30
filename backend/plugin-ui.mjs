@@ -297,6 +297,17 @@ export function createPluginUI({ broadcast, getClientCount }) {
 		return { status: 200, body: { ok: true } };
 	}
 
+	/** 重载时清空旧插件界面，不把旧标题定时器带到新扩展运行时。 */
+	function reset() {
+		settleAllUI();
+		cancelUIGrace();
+		if (uiTitleTimer) clearTimeout(uiTitleTimer);
+		uiTitleTimer = null;
+		uiPendingTitle = '';
+		lastNotice = { key: '', at: 0 };
+		pushUI({ phase: 'reset' });
+	}
+
 	/** 关闭全部等待请求和定时器，确保插件 Promise 不悬挂。 */
 	function close() {
 		settleAllUI();
@@ -305,5 +316,5 @@ export function createPluginUI({ broadcast, getClientCount }) {
 		uiTitleTimer = null;
 	}
 
-	return { settleAllUI, scheduleUIGrace, cancelUIGrace, pushUI, flushTitle, createExtensionUIContext, resendPendingUI, respond, close };
+	return { reset, settleAllUI, scheduleUIGrace, cancelUIGrace, pushUI, flushTitle, createExtensionUIContext, resendPendingUI, respond, close };
 }

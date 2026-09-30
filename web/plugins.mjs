@@ -39,9 +39,20 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	/** 页面原始标题（插件改过标题后用于还原）。 */
 	const defaultTitle = document.title;
 
-	/** 插件界面帧：对话框（ask/resolved）、通知、状态、部件、标题、写入输入框。 */
+	/** 插件界面帧：重置、对话框、通知、状态、部件、标题、写入输入框。 */
 	function handleUIFrame(frame) {
 		const phase = frame.phase;
+		if (phase === 'reset') {
+			uiQueue = [];
+			hideUI();
+			pluginStatus.clear();
+			pluginWidgets.clear();
+			paintPluginStatus();
+			paintPluginWidgets();
+			pluginNoticeKey = '';
+			document.title = defaultTitle;
+			return;
+		}
 		if (phase === 'ask') {
 			// 重连时服务端会把未决对话框重发一遍，同一个 id 只留一份
 			if (uiQueue.some((item) => item.id === frame.id)) return;

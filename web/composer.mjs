@@ -19,6 +19,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		{ name: '/model', desc: '切换模型 / 思考等级', kind: 'action' },
 		{ name: '/new', desc: '新建会话', kind: 'action' },
 		{ name: '/rewind', desc: '回退到某条提问之前', kind: 'action' },
+		{ name: '/reload', desc: '重载扩展 / 技能 / 提示模板与配置', kind: 'action' },
 	];
 
 	/** 服务端列出的可补全命令（技能、提示模板、插件命令）；kind=insert 表示选中只写入输入框。 */
@@ -446,6 +447,18 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		renderAttachments();
 	}
 
+	/** 原地重载服务端资源；会话帧会同步最新命令与插件错误，不刷新页面。 */
+	async function reloadResources() {
+		try {
+			const response = await fetch('/api/reload', { method: 'POST' });
+			const data = await response.json();
+			if (!response.ok) throw new Error(data.error || '服务端拒绝重载');
+			addStatusRow('资源已重载');
+		} catch (err) {
+			addStatusRow('重载失败：' + String(err?.message || err), 'error');
+		}
+	}
+
 	/** 执行页面内命令：只在本页处理，不会发给模型。 */
 	async function runActionCommand(head, rest) {
 		hideCommands();
@@ -454,6 +467,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		if (head === '/resume') await openSessionPicker();
 		else if (head === '/model') await openModelPicker(rest);
 		else if (head === '/rewind') await openRewind();
+		else if (head === '/reload') await reloadResources();
 		else await newSession();
 	}
 
@@ -481,7 +495,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		const text = inputEl.value.trim();
 		const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
 		if (!text && !images.length) return;
-		// 页面内命令（/resume、/model、/new、/rewind）只在本页处理，不发给模型；
+		// 页面内命令（/resume、/model、/new、/rewind、/reload）只在本页处理，不发给模型；
 		// 技能 / 模板 / 插件命令不走这里，原样发送交给 pi 展开。
 		const { head, rest } = splitCommand(text);
 		if (COMMANDS.some((command) => command.name === head)) {

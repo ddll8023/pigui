@@ -18,6 +18,9 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 是否正在跑回合（决定新消息走 prompt 还是 steer）。 */
 	let busy = false;
 
+	/** 资源重载期间禁止重复重载和会话修改，但仍允许页面回答插件对话框。 */
+	let reloading = false;
+
 	/** 是否成功给插件绑定了可交互的 UI 上下文（声明放在 sessionInfo 之前，避免暂时性死区）。 */
 	let pluginUiBound = false;
 
@@ -308,6 +311,38 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 读取回合运行状态，保留 prompt 自动转 steer 的判断来源。 */
 	function isBusy() { return busy; }
 
+	/** 读取资源重载锁，供路由拒绝冲突请求。 */
+	function isReloading() { return reloading; }
+
+	/** 原地重载 SDK 资源；保留会话及事件订阅，不调用 boot 或重放历史。 */
+	async function reload() {
+		const session = active?.session;
+		if (!session || typeof session.reload !== 'function') {
+			throw Object.assign(new Error('当前 pi 版本不支持资源重载'), { status: 400 });
+		}
+		if (reloading || busy || session.isStreaming || session.isCompacting || session.isIdle === false) {
+			throw Object.assign(new Error('会话正在运行或重载，请等待结束后再重载'), { status: 409 });
+		}
+		reloading = true;
+		try {
+			// 先释放旧插件的等待；shutdown 可能再次更新界面，在新插件启动前再清一次。
+			ui.reset();
+			flushUserEcho();
+			await session.reload({ beforeSessionStart: ui.reset });
+		} finally {
+			try {
+				pluginErrors = (session.resourceLoader?.getExtensions?.().errors ?? []).slice(0, 5).map((item) => ({
+					path: String(item?.path ?? ''),
+					error: String(item?.error ?? ''),
+				}));
+			} finally {
+				reloading = false;
+				// 失败时资源也可能已部分替换，让页面命令与 SDK 当前状态保持一致。
+				broadcastSession();
+			}
+		}
+	}
+
 	/** 清除显式会话路径后新建；旧会话由 boot 先完成收尾。 */
 	async function newSession() {
 		sessionPath = '';
@@ -327,5 +362,5 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		try { active?.session?.dispose(); } catch {}
 	}
 
-	return { getSession, isBusy, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
+	return { getSession, isBusy, isReloading, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
 }

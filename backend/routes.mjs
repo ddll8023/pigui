@@ -13,12 +13,29 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 	/** SSE 重连时即时读取当前分支，不缓存旧会话历史。 */
 	function currentHistory() { return historyFrames(runtime.currentViews()); }
 
+	/** 重载期间不允许会话修改；插件回答与关闭服务仍由独立入口处理。 */
+	function assertNotReloading() {
+		if (runtime.isReloading()) {
+			throw Object.assign(new Error('资源正在重载，请稍后再试'), { status: 409 });
+		}
+	}
+
+	/** 读取会话修改请求；读请求体期间也可能开始重载，因此读完再检查一次。 */
+	async function readSessionBody(req) {
+		const body = await readJson(req);
+		assertNotReloading();
+		return body;
+	}
+
 	/** 按方法与路径调度请求，在统一边界广播和返回未处理异常。 */
 	async function handleRequest(req, res) {
 		const url = new URL(req.url ?? '/', 'http://127.0.0.1');
 		const route = `${req.method} ${url.pathname}`;
 		try {
 			if (await serveAsset(route, res)) return;
+			if (req.method === 'POST' && route !== 'POST /api/ui-response' && route !== 'POST /api/shutdown') {
+				assertNotReloading();
+			}
 
 			if (route === 'GET /api/context') {
 				const sessions = await sdk.SessionManager.list(cwd).catch(() => []);
@@ -100,7 +117,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/prompt') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const text = messageText(body);
 				// 附件里的图片随消息一起发给 pi（缩放、校验由 pi 自己做）
 				const parsed = parseImages(body);
@@ -130,7 +147,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/steer') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const text = messageText(body);
 				const parsed = parseImages(body);
 				if (parsed.error) return send(res, 400, { error: parsed.error }, { 'content-type': 'application/json' });
@@ -141,7 +158,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/model') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const provider = typeof body?.provider === 'string' ? body.provider.trim() : '';
 				const modelId = typeof body?.id === 'string' ? body.id.trim() : '';
 				if (!provider || !modelId) {
@@ -173,7 +190,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/thinking') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const level = typeof body?.level === 'string' ? body.level.trim() : '';
 				if (!THINKING_LEVELS.includes(level)) {
 					const error = `不支持的思考等级：${level || '(空)'}`;
@@ -204,7 +221,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/rewind') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const entryId = typeof body?.entryId === 'string' ? body.entryId.trim() : '';
 				if (!entryId) return send(res, 400, { error: '缺少 entryId' }, { 'content-type': 'application/json' });
 				if (!runtime.getSession()) return send(res, 400, { error: '会话尚未就绪' }, { 'content-type': 'application/json' });
@@ -244,13 +261,18 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				);
 			}
 
+			if (route === 'POST /api/reload') {
+				await runtime.reload();
+				return send(res, 200, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
+			}
+
 			if (route === 'POST /api/new') {
 				await runtime.newSession();
 				return send(res, 202, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
 			}
 
 			if (route === 'POST /api/switch') {
-				const body = await readJson(req);
+				const body = await readSessionBody(req);
 				const wanted = typeof body?.sessionFile === 'string' ? body.sessionFile.trim() : '';
 				if (!wanted) return send(res, 400, { error: '缺少 sessionFile' }, { 'content-type': 'application/json' });
 				// 只允许切到本工作目录名下的会话，避免被当作任意文件读取入口
@@ -259,6 +281,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				if (!found) {
 					return send(res, 404, { error: '该会话不属于当前工作目录' }, { 'content-type': 'application/json' });
 				}
+				assertNotReloading();
 				await runtime.switchSession(path.resolve(found.path));
 				return send(res, 202, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
 			}
@@ -277,8 +300,9 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			return send(res, 404, { error: `未知路由: ${route}` }, { 'content-type': 'application/json' });
 		} catch (err) {
 			const message = String(err?.message ?? err);
-			broadcast({ kind: 'error', message });
-			return send(res, 500, { error: message }, { 'content-type': 'application/json' });
+			const status = err?.status === 400 || err?.status === 409 ? err.status : 500;
+			if (status === 500) broadcast({ kind: 'error', message });
+			return send(res, status, { error: message }, { 'content-type': 'application/json' });
 		}
 	}
 
