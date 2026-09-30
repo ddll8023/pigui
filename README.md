@@ -55,9 +55,19 @@ pigui
 | `/new` | 新建会话（与顶栏“新建会话”按钮相同） |
 | `/rewind` | 打开回退浮层：列出本会话的每条提问，`↑`/`↓` 移动、`Enter` 回退、`Esc` 关闭，也可以直接点条目（详见下节） |
 
-打一个 `/` 就会出现命令提示条：`↑`/`↓` 移动、`Enter` 或 `Tab` 直接执行，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`）。输入框失焦或不再以 `/` 开头时提示自动收起。
+打一个 `/` 就会出现命令提示条，候选分两类：上面 4 条**页面命令**，以及服务端列出的**技能**（`/skill:名称`）、**提示模板**（`/模板名`）和**插件注册的命令**。`↑`/`↓` 移动、`Enter` 或 `Tab` 选中，也可以直接用鼠标点；继续输入会按前缀过滤（例如只打 `/re` 就只剩 `/resume`），前缀没有结果时退回子串匹配（`/read` 也能找到 `/skill:code-readability-review`）。输入框失焦或不再以 `/` 开头时提示自动收起。
 
-只有列在命令表里、且完全匹配（`/model` 带参数时首个词匹配）的输入会被当作命令；`/usr/local/bin` 这类以 `/` 开头的普通文本仍会照常发送。
+- **页面命令**：选中即在本页执行，不会发给模型。
+- **技能 / 提示模板 / 插件命令**：选中只把 `/名称 ` 补进输入框（尾部留一个空格好接参数），再按 `Enter` 发送；展开与派发都由 pi 自己完成，页面不读技能文件内容。
+
+只有上面 4 条页面命令会被本页拦截（带参数时按首个词匹配）；`/skill:名称`、`/模板名`、插件命令以及 `/usr/local/bin` 这类以 `/` 开头的普通文本都原样发给 pi，由 pi 决定展开还是当普通文本处理。
+
+## 技能
+
+- 提示条里的 `/skill:名称` 来自当前会话已加载的技能（`~/.pi/agent/skills`、`~/.agents/skills`、项目 `.pi/skills` 等），描述就是 `SKILL.md` 的 `description`；选中后插入 `/skill:名称 `，回车发送，pi 会把技能内容展开成这次提问的一部分（`disable-model-invocation` 的技能也能这样显式调用）。
+- 技能内容写进会话后，页面**不把它铺成正文**：用户那条气泡显示一枚「技能 · skill:名称」徽标加你写的参数；`/rewind` 回退到这条提问时，填回输入框的也是 `/skill:名称 参数`，不是整份 `SKILL.md`。
+- 技能只在 pigui **启动时**加载：新装或改过技能后要重启 pigui（页面刷新、`/new` 都不够）。
+- 老版本 pi SDK 没有 `resourceLoader` / `parseSkillBlock` 时不列技能、也不画徽标，技能消息按普通文本显示。
 
 ## @ 引用文件
 
@@ -254,9 +264,9 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/` | 页面（`index.html`） |
-| GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表 |
+| GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表；上下文含 `commands`（提示条候选项：`{name, description, source}`，`source` 为 `skill` / `prompt` / `extension`） |
 | GET | `/api/models` | `{current, default, models, thinkingLevel, thinkingLevels}`；`models` 为本机已配鉴权的可用模型（裁剪后的 `provider/id/name/reasoning/contextWindow/input`，当前模型置顶） |
-| GET | `/api/messages` | 当前会话的消息（`{role, text, blocks, entryId, durationMs?, turnMs?}`） |
+| GET | `/api/messages` | 当前会话的消息（`{role, text, blocks, entryId, durationMs?, turnMs?, skill?}`） |
 | GET | `/api/sessions` | 该目录的会话列表 |
 | GET | `/api/usage/external` | 外部额度：`?refresh=1` 强制重取（默认 60 秒缓存）；返回 `{fetchedAt, codex, opencode}`，每家为 `{ok:true, windows:[…], credits?, limitReached?, fetchedAt}` 或 `{ok:false, error}`；Codex 窗口是 `remainingPercent`，OpenCode 窗口是 `usedPercent` |
 | GET | `/api/files` | `?q=`；工作目录内的文件与目录候选（`{cwd, files:[{path, dir}]}`，相对路径、最多 50 条，只列路径不读内容） |
@@ -269,15 +279,15 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
 | POST | `/api/new` | 新建会话（旧的会被释放） |
 | POST | `/api/switch` | `{sessionFile}`；切换到该目录下的某个会话（不属于该目录则 404） |
-| POST | `/api/rewind` | `{entryId}`；回退到该用户消息节点之前（只接受本会话的用户提问，否则 404；运行中 409；被扩展取消也 409），被放弃的分支既不删除也不总结；成功返回 `{editorText, context}` |
+| POST | `/api/rewind` | `{entryId}`；回退到该用户消息节点之前（只接受本会话的用户提问，否则 404；运行中 409；被扩展取消也 409），被放弃的分支既不删除也不总结；成功返回 `{editorText, context}`（这条提问由技能展开时，`editorText` 还原成 `/skill:名称 参数`） |
 | POST | `/api/ui-response` | `{id, value \| confirmed \| cancelled}`；回答插件对话框（同 pi RPC 协议的三种形态）；id 已结束或不存在时 404 |
 | POST | `/api/shutdown` | 关闭服务 |
 
-SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
+SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`/命令表 `commands`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`）、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`thinking_level_changed` 的 `level`；单帧过大时降级为 `frame_truncated`）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）。
 
-**消息结构**：`{ role, text, blocks, entryId }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）、`image`（带 `mimeType` 与取图地址 `url`，`url` 为空时页面不渲染该块）；`text` 是全部块拼成的纯文本，供简单渲染使用。图片块**不带** base64 内容：十几 MB 的图片会把单帧撑过上限、导致整帧被丢掉，所以历史里的图片由页面按 `url` 去 `/api/image` 懒加载。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标、并把耗时挂回对应行。助手消息可能额外带 `durationMs`（该次模型调用耗时），用户消息可能额外带 `turnMs`（该回合总耗时），都来自旁边的耗时文件（见“耗时显示”）。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
+**消息结构**：`{ role, text, blocks, entryId, skill? }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）、`image`（带 `mimeType` 与取图地址 `url`，`url` 为空时页面不渲染该块）；`text` 是全部块拼成的纯文本，供简单渲染使用。用户消息由 `/skill:名称 参数` 展开而来时带 `skill: {name, location}`，此时 `text` 只是参数部分，技能全文不下发。图片块**不带** base64 内容：十几 MB 的图片会把单帧撑过上限、导致整帧被丢掉，所以历史里的图片由页面按 `url` 去 `/api/image` 懒加载。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标、并把耗时挂回对应行。助手消息可能额外带 `durationMs`（该次模型调用耗时），用户消息可能额外带 `turnMs`（该回合总耗时），都来自旁边的耗时文件（见“耗时显示”）。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记）。
 
 默认不转发 `tool_execution_update`、`message_start`、`turn_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
 

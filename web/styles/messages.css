@@ -66,6 +66,7 @@ main {
 .row.user .code-block pre code span { color: inherit; }
 .row.user .code-head .lang, .row.user .code-head .copy { color: var(--strong-muted); }
 .row.user .body hr, .row.user .body blockquote, .row.user .code-block pre, .row.user .table-wrap th, .row.user .table-wrap td { border-color: var(--strong-line); }
+.skill-badge { display: inline-block; margin: 0 0 6px; padding: 2px 8px; border: 1px solid var(--strong-line); border-radius: 999px; background: var(--strong-code-bg); color: var(--strong-text); font: 10.5px/1.6 var(--mono); white-space: nowrap; }
 .row.tool .who { color: var(--tool); font-size: 9px; }
 .row.tool .gutter { padding-top: 12px; }
 .row.error .who { color: var(--accent); }

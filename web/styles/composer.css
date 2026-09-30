@@ -110,7 +110,8 @@
 	border: 1px solid var(--line-strong);
 	border-radius: 6px;
 	box-shadow: var(--floating-shadow);
-	overflow: hidden;
+	max-height: 264px;
+	overflow-y: auto;
 }
 .cmdbar[hidden] {
 	display: none;
@@ -138,10 +139,15 @@
 .cmd-item .name {
 	font: 12.5px/1.6 var(--mono);
 	color: var(--text);
+	white-space: nowrap;
 }
 .cmd-item .desc {
 	font: 11.5px/1.6 var(--mono);
 	color: var(--faint);
+	/* 技能描述可能很长：压成一行省略，提示条不被单条撑开 */
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
 /* ---------- @ 引用文件提示条 ---------- */

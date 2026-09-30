@@ -1,7 +1,7 @@
 /** HTTP API 调度；保留现有状态码、响应字段与失败语义。 */
 import path from 'node:path';
 import { send, readJson, messageText, parseImages, serveAsset, IMAGE_MIME_TYPES } from './transport.mjs';
-import { historyFrames } from './protocol.mjs';
+import { historyFrames, skillCommandText } from './protocol.mjs';
 
 /** 允许的请求等级，实际能力仍由 SDK 收敛。 */
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -231,10 +231,15 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				}
 				runtime.broadcastSession();
 				runtime.broadcastHistory();
+				const editorText = typeof result?.editorText === 'string' ? result.editorText : '';
 				return send(
 					res,
 					200,
-					{ editorText: typeof result?.editorText === 'string' ? result.editorText : '', context: runtime.sessionInfo() },
+					{
+						// 技能消息落盘的是展开后的全文，填回输入框时还原成 `/skill:名称 参数`
+						editorText: skillCommandText(editorText, sdk.parseSkillBlock) || editorText,
+						context: runtime.sessionInfo(),
+					},
 					{ 'content-type': 'application/json' },
 				);
 			}

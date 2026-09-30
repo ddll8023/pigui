@@ -1,8 +1,17 @@
 /** SDK 会话生命周期、上下文投影和用户回显；不持有传输连接。 */
 import { messageView, attachImageUrls, historyFrames, eventFrame } from './protocol.mjs';
 
+/** 提示条一行展示用的命令描述上限。 */
+const MAX_COMMAND_DESCRIPTION = 200;
+
 /** 创建会话控制器；切换时先收尾旧资源，再公布新会话和历史。 */
 export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, broadcast, timings, telemetry, ui }) {
+	/**
+	 * pi 的技能块解析器。
+	 * 老版本 SDK 没有 parseSkillBlock 时置空，技能消息退化成普通文本（与改动前一致）。
+	 */
+	const parseSkill = typeof sdk.parseSkillBlock === 'function' ? sdk.parseSkillBlock : undefined;
+
 	/** 当前会话：{ session, unsubscribe }。 */
 	let active = null;
 
@@ -31,12 +40,12 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			const views = [];
 			for (const entry of manager.buildSessionProjection()?.entries ?? []) {
 				const entryId = entry?.sourceEntry?.id ?? '';
-				for (const message of entry?.messages ?? []) views.push(timings.withTiming(messageView(message, entryId), entryId));
+				for (const message of entry?.messages ?? []) views.push(timings.withTiming(messageView(message, entryId, parseSkill), entryId));
 			}
 			return views;
 		}
 		// 老版本 SDK 没有 projection：仍然下发历史，只是没有 entryId（页面据此禁用回退、也不显示耗时）
-		return (session?.state?.messages ?? []).map((message) => timings.withTiming(messageView(message), ''));
+		return (session?.state?.messages ?? []).map((message) => timings.withTiming(messageView(message, '', parseSkill), ''));
 	}
 
 	/** 广播当前上下文路径的完整历史（建连、新建/切换会话、回退之后都要让页面重放）。 */
@@ -64,7 +73,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		const { message, timer } = pendingEcho;
 		pendingEcho = null;
 		if (timer) clearTimeout(timer);
-		const frame = eventFrame({ type: 'message_end', message });
+		const frame = eventFrame({ type: 'message_end', message }, undefined, parseSkill);
 		// 查不到 id（极端时序）也照发：退回到“这行暂时不能回退”，不影响消息本身
 		if (frame?.message) frame.message.entryId = timings.resolveEntryId(message);
 		// 条目 id 定下来之后才能给出图片取图地址（实时回显的图片也要能显示）
@@ -72,9 +81,39 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		broadcast(frame);
 	}
 
-	/** 当前模型支持的思考等级（老版本 SDK 没有该方法时返回空数组，不影响其它路由）。 */
+	/** 当前会话支持的思考等级（老版本 SDK 没有该方法时返回空数组，不影响其它路由）。 */
 	function availableThinkingLevels(session) {
 		return typeof session?.getAvailableThinkingLevels === 'function' ? session.getAvailableThinkingLevels() : [];
+	}
+
+	/**
+	 * 当前会话可用的斜杠命令：技能（`skill:名称`）、提示模板和插件注册的命令。
+	 * 三类都由 pi 的 session.prompt() 自己展开或派发，页面只负责列出并补全；
+	 * 老版本 SDK 缺某个入口时该项为空，不影响其它命令。
+	 */
+	function slashCommands(session) {
+		if (!session) return [];
+		const commands = [];
+		/** 按 name 去重（先发现者胜出，与 pi 处理同名资源的规则一致）。 */
+		const push = (name, description, source) => {
+			const text = String(name || '');
+			if (!text || commands.some((item) => item.name === text)) return;
+			commands.push({ name: text, description: String(description || '').slice(0, MAX_COMMAND_DESCRIPTION), source });
+		};
+		try {
+			for (const command of session.extensionRunner?.getRegisteredCommands?.() ?? []) {
+				push(command.invocationName, command.description, 'extension');
+			}
+		} catch {}
+		try {
+			for (const template of session.promptTemplates ?? []) push(template.name, template.description, 'prompt');
+		} catch {}
+		try {
+			for (const skill of session.resourceLoader?.getSkills?.().skills ?? []) {
+				push(`skill:${skill.name}`, skill.description, 'skill');
+			}
+		} catch {}
+		return commands;
 	}
 
 	/** 判断两个模型是否是同一个（provider + id）。 */
@@ -137,6 +176,8 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			turn: timings.currentTurnInfo(),
 			// 插件是否拿到了可交互的界面（老版本 SDK 没有 bindExtensions、或启动时关了插件界面时为 false）
 			pluginUi: pluginUiBound,
+			// 页面 `/` 提示条的候选项：技能、提示模板、插件命令（都由 pi 自己展开或派发）
+			commands: slashCommands(session),
 			// 插件加载失败列表（页面一次性提示，避免静默失效）
 			pluginErrors,
 			pid: process.pid,
@@ -224,7 +265,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			if (type === 'agent_settled') telemetry.rateReset();
 			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
 			flushUserEcho();
-			broadcast(eventFrame(event, extra));
+			broadcast(eventFrame(event, extra, parseSkill));
 		});
 		active = { session, unsubscribe };
 		busy = false;

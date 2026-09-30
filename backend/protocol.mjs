@@ -38,13 +38,38 @@ function textOfValue(value, depth = 0) {
 }
 
 /**
+ * 识别用户消息里的技能块。
+ * pi 把 `/skill:名称 参数` 展开成技能全文后才写进会话，只有 SDK 的 parseSkillBlock
+ * 知道那个格式；老版本 SDK 没这个导出时返回 null，消息按普通文本处理。
+ */
+function skillBlockOf(text, parseSkill) {
+	if (!text || typeof parseSkill !== 'function') return null;
+	try {
+		return parseSkill(text) || null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * 把技能块还原成可以再次发送的命令：`/skill:名称 参数`；不是技能块时返回空串。
+ * 回退时用它填回输入框，避免把整份 SKILL.md 全文倒进编辑器。
+ */
+export function skillCommandText(text, parseSkill) {
+	const block = skillBlockOf(text, parseSkill);
+	if (!block) return '';
+	return `/skill:${block.name}${block.userMessage ? ' ' + block.userMessage : ''}`;
+}
+
+/**
  * 把 pi 的消息压成 { role, text, blocks }。
  *
  * blocks 保留每块的类型（thinking / text / toolCall / toolResult / …）与 toolCallId，
  * 页面据此可以分区渲染、把工具输出折到对应调用下面；text 是拼好的纯文本，供简单渲染使用。
  * entryId 是这条消息在会话树里所属条目的 id（页面回退时用），取不到时为空串。
+ * parseSkill 是 pi SDK 的 parseSkillBlock，用于把技能消息压成“名称 + 参数”。
  */
-export function messageView(message, entryId = '') {
+export function messageView(message, entryId = '', parseSkill) {
 	const role = typeof message?.role === 'string' ? message.role : 'unknown';
 	const blocks = [];
 	// 图片块的序号（同一条消息里第几张），页面靠它拼 /api/image 的取图地址
@@ -108,6 +133,18 @@ export function messageView(message, entryId = '') {
 		.trim();
 	// entryId 是会话树里这条消息所在条目的 id，页面据此定位回退目标；取不到时为空串
 	const view = { role, text, blocks, entryId };
+	// 技能消息落盘的是展开后的全文：只下发名称与参数，页面画成徽标 + 参数，
+	// 否则一条提问就能把整份 SKILL.md 铺在气泡里（图片块与取图序号保持不动）。
+	if (role === 'user') {
+		const skill = skillBlockOf(text, parseSkill);
+		if (skill) {
+			const args = skill.userMessage ?? '';
+			view.skill = { name: skill.name, location: skill.location };
+			view.text = args;
+			view.blocks = blocks.filter((block) => block.type !== 'text');
+			if (args) view.blocks.unshift({ type: 'text', text: args });
+		}
+	}
 	// 工具结果的归属信息在消息级字段上（content 里只有输出文本），单独带出来供页面展示
 	if (role === 'toolResult') {
 		view.toolCallId = typeof message?.toolCallId === 'string' ? message.toolCallId : '';
@@ -164,8 +201,9 @@ export function historyFrames(views) {
  * 把 session 事件压成页面可用的小帧；返回 null 表示这个事件不需要发给页面。
  * 默认过滤高频噪声事件（tool_execution_update / message_start / turn_start），PIGUI_DEBUG=1 时不过滤。
  * extra 是调用方注入的实测信息，目前只有 message_end 的单次耗时 durationMs。
+ * parseSkill 是 pi SDK 的 parseSkillBlock，用户消息命中技能块时交给 messageView 压成“名称 + 参数”。
  */
-export function eventFrame(event, extra) {
+export function eventFrame(event, extra, parseSkill) {
 	if (!event || typeof event.type !== 'string') return null;
 	if (event.type === 'message_update') {
 		const inner = event.assistantMessageEvent;
@@ -175,7 +213,7 @@ export function eventFrame(event, extra) {
 	}
 	if (!DEBUG && QUIET_EVENT_TYPES.has(event.type)) return null;
 	if (event.type === 'message_end') {
-		const view = messageView(event.message);
+		const view = messageView(event.message, '', parseSkill);
 		// 耗时是服务端实测的：附在消息视图上，页面据此定格该行的计时
 		if (Number.isFinite(extra?.durationMs)) view.durationMs = Math.round(extra.durationMs);
 		return { kind: 'message', message: view };

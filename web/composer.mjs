@@ -13,13 +13,16 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	const filePickerEl = document.getElementById('filePicker');
 	const composerEl = document.getElementById('composer');
 
-	/** 页面内命令表（输入 / 时提示）。 */
+	/** 页面内命令表（输入 / 时提示）；kind=action 表示选中即在本页执行。 */
 	const COMMANDS = [
-		{ name: '/resume', desc: '切换会话' },
-		{ name: '/model', desc: '切换模型 / 思考等级' },
-		{ name: '/new', desc: '新建会话' },
-		{ name: '/rewind', desc: '回退到某条提问之前' },
+		{ name: '/resume', desc: '切换会话', kind: 'action' },
+		{ name: '/model', desc: '切换模型 / 思考等级', kind: 'action' },
+		{ name: '/new', desc: '新建会话', kind: 'action' },
+		{ name: '/rewind', desc: '回退到某条提问之前', kind: 'action' },
 	];
+
+	/** 服务端列出的可补全命令（技能、提示模板、插件命令）；kind=insert 表示选中只写入输入框。 */
+	let remoteCommands = [];
 
 	/** 命令提示条状态。 */
 	let commandOpen = false;
@@ -76,6 +79,36 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		return text.toLowerCase();
 	}
 
+	/** 提示条候选项：页面内命令在前，服务端命令在后；与页面命令重名的服务端命令不再列出。 */
+	function commandCandidates() {
+		return COMMANDS.concat(remoteCommands);
+	}
+
+	/** 把命令写成“命令名 + 参数”两段（`/model claude` → `/model` 与 `claude`）。 */
+	function splitCommand(text) {
+		const space = String(text || '').indexOf(' ');
+		return space > 0
+			? { head: text.slice(0, space), rest: text.slice(space + 1).trim() }
+			: { head: text, rest: '' };
+	}
+
+	/**
+	 * 接收会话帧里的命令表（技能 `skill:名称`、提示模板、插件命令）。
+	 * 页面只负责列出并补全，展开与派发仍由 pi 的 session.prompt() 完成。
+	 */
+	function setCommands(list) {
+		const localNames = new Set(COMMANDS.map((command) => command.name));
+		remoteCommands = (Array.isArray(list) ? list : [])
+			.filter((item) => item && item.name && !localNames.has('/' + item.name))
+			.map((item) => ({
+				name: '/' + item.name,
+				desc: String(item.description || ''),
+				kind: 'insert',
+				source: String(item.source || ''),
+			}));
+		refreshCommands();
+	}
+
 	/** 按当前输入刷新命令提示条。 */
 	function refreshCommands() {
 		if (isSessionPickerOpen()) {
@@ -87,7 +120,12 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			hideCommands();
 			return;
 		}
-		const matches = COMMANDS.filter((command) => command.name.startsWith(query));
+		const candidates = commandCandidates();
+		// 先前缀匹配；没有结果时退回子串匹配，`/read` 也能找到 `/skill:code-readability-review`
+		let matches = candidates.filter((command) => command.name.toLowerCase().startsWith(query));
+		if (!matches.length) {
+			matches = candidates.filter((command) => command.name.toLowerCase().includes(query.slice(1)));
+		}
 		if (!matches.length) {
 			hideCommands();
 			return;
@@ -106,6 +144,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			const item = document.createElement('li');
 			item.className = 'cmd-item';
 			item.dataset.active = String(index === commandIndex);
+			item.dataset.kind = command.kind || '';
 			const name = document.createElement('span');
 			name.className = 'name';
 			name.textContent = command.name;
@@ -407,13 +446,8 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		renderAttachments();
 	}
 
-	/** 执行页面内命令；返回 false 表示不是已知命令（应当作普通消息发送）。 */
-	async function runCommand(name) {
-		const text = String(name || '').trim();
-		const space = text.indexOf(' ');
-		const head = space > 0 ? text.slice(0, space) : text;
-		const rest = space > 0 ? text.slice(space + 1).trim() : '';
-		if (head !== '/resume' && head !== '/model' && head !== '/new' && head !== '/rewind') return false;
+	/** 执行页面内命令：只在本页处理，不会发给模型。 */
+	async function runActionCommand(head, rest) {
 		hideCommands();
 		inputEl.value = '';
 		autoGrow();
@@ -421,6 +455,24 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		else if (head === '/model') await openModelPicker(rest);
 		else if (head === '/rewind') await openRewind();
 		else await newSession();
+	}
+
+	/**
+	 * 提示条选中命令后的动作。
+	 * 页面命令直接执行；技能 / 模板 / 插件命令只把 `/名称 ` 补进输入框（尾部留空格好接参数），
+	 * 由用户回车发送、pi 自己展开。返回 false 表示不是已知命令（当作普通消息发送）。
+	 */
+	async function runCommand(name) {
+		const text = String(name || '').trim();
+		const { head, rest } = splitCommand(text);
+		const command = commandCandidates().find((item) => item.name === head);
+		if (!command) return false;
+		if (command.kind === 'insert') {
+			hideCommands();
+			setText(command.name + ' ', { caret: true });
+			return true;
+		}
+		await runActionCommand(head, rest);
 		return true;
 	}
 
@@ -429,8 +481,13 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		const text = inputEl.value.trim();
 		const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
 		if (!text && !images.length) return;
-		// 页面内命令（/resume、/model、/new）只在本页处理，不发给模型
-		if (text && (await runCommand(text))) return;
+		// 页面内命令（/resume、/model、/new、/rewind）只在本页处理，不发给模型；
+		// 技能 / 模板 / 插件命令不走这里，原样发送交给 pi 展开。
+		const { head, rest } = splitCommand(text);
+		if (COMMANDS.some((command) => command.name === head)) {
+			await runActionCommand(head, rest);
+			return;
+		}
 		// 发送前先留下本地缩略图信息，清单清空后再画本地行
 		const previews = imageAttachments().map((item) => ({ objectUrl: item.objectUrl, mimeType: item.mimeType }));
 		inputEl.value = '';
@@ -551,5 +608,5 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		autoGrow();
 	}
 
-	return { init, setText };
+	return { init, setText, setCommands };
 }

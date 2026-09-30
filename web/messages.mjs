@@ -446,6 +446,34 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		}
 	}
 
+	/** 技能调用徽标：pi 把 `/skill:名称 参数` 展开后才落盘，页面只回显名称与参数。 */
+	function addSkillBadge(body, name) {
+		const badge = document.createElement('span');
+		badge.className = 'skill-badge';
+		badge.textContent = '技能 · ' + name;
+		badge.title = '本次提问由技能 ' + name + ' 展开';
+		// 徽标固定在正文最前，参数与图片跟在后面
+		body.prepend(badge);
+	}
+
+	/**
+	 * 把本地回显的用户行改画成技能形态：徽标 + 参数。
+	 * 本地行原本画的是你敲的 `/skill:名称 参数`；图片块保留，本地缩略图还在用那些 blob URL。
+	 */
+	function paintSkillRow(row, message) {
+		const body = row.querySelector('.body');
+		if (!body) return;
+		for (const node of [...body.querySelectorAll('.message-text')]) node.remove();
+		addSkillBadge(body, message.skill.name);
+		const args = String(message.text || '');
+		if (args) {
+			const node = document.createElement('div');
+			node.className = 'message-text';
+			renderMarkdown(args, node);
+			body.append(node);
+		}
+	}
+
 	/** 渲染完整历史消息；工具结果只回填，不再追加重复的 TOOL 输出卡。 */
 	function renderMessage(message) {
 		const role = message.role || 'unknown';
@@ -464,6 +492,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		// 历史帧带落盘的耗时：assistant 是单次模型调用，user 是该回合合计
 		if (role === 'assistant') setRowDuration(row, message.durationMs);
 		else if (role === 'user') setRowDuration(row, message.turnMs, '回合 ');
+		if (message.skill) addSkillBadge(body, message.skill.name);
 		if (blocks.length) for (const block of blocks) addBlock(body, block);
 		else if (message.text) addBlock(body, { type: 'text', text: message.text });
 		return row;
@@ -608,12 +637,17 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		const message = frame.message || {};
 		if (message.role === 'assistant') { settleAssistantMessage(message); return true; }
 		if (message.role === 'user' && pendingUserRows.length) {
+			// 技能消息落盘的是展开后的全文：先按 `/skill:名称` 精确配对，命中后本地行也改成徽标形态
+			const skillHead = message.skill ? '/skill:' + message.skill.name : '';
 			const text = String(message.text || '').trim();
-			let index = pendingUserRows.findIndex((item) => item.text.trim() === text);
-			// 技能或模板改写正文时仍按发送顺序配对，保留现有回显语义。
+			let index = skillHead
+				? pendingUserRows.findIndex((item) => item.text.trim().startsWith(skillHead))
+				: pendingUserRows.findIndex((item) => item.text.trim() === text);
+			// 正文被服务端改写（技能 / 模板展开）时仍按发送顺序配对，保留现有回显语义。
 			if (index < 0) index = 0;
 			const [pending] = pendingUserRows.splice(index, 1);
 			if (pending.row && message.entryId) pending.row.dataset.entryId = message.entryId;
+			if (pending.row && message.skill) paintSkillRow(pending.row, message);
 			return true;
 		}
 		renderMessage(message);
