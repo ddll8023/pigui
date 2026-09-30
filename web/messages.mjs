@@ -25,6 +25,15 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		done: ['✓', '完成'], failed: ['!', '失败'], unknown: ['?', '未确认'],
 	};
 
+	/** 需要文件级展示（路径 + 改动量 + diff）的工具。 */
+	const FILE_TOOLS = new Set(['edit', 'write']);
+
+	/** write 内容预览的最大行数，超出只报剩余行数。 */
+	const WRITE_PREVIEW_LINES = 20;
+
+	/** 会话工作目录；只用于把工具参数里的绝对路径裁成相对路径显示。 */
+	let cwd = '';
+
 	/** 本地已画出、还在等服务端回显的用户行：{ text, row }，按发送顺序排队。 */
 	let pendingUserRows = [];
 
@@ -275,6 +284,159 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			Object.entries(counts).map(([state, count]) => count + ' ' + TOOL_STATES[state][1]).join(' / ');
 	}
 
+	/** 输出块的标签与文案：有结果给行数与字节数，没有结果说明原因。 */
+	function refreshOutput(entry) {
+		if (entry.hasResult) {
+			const lines = entry.text ? entry.text.split('\n').length : 0;
+			entry.outputLabel.textContent = '输出 · ' + lines + ' 行 · ' + new TextEncoder().encode(entry.text).length + ' 字节';
+			entry.output.textContent = entry.text || '（空输出）';
+			return;
+		}
+		entry.outputLabel.textContent = '输出';
+		entry.output.textContent = entry.state === 'unknown' ? '未收到工具结果，无法确认本次调用的完整输出。' :
+			entry.state === 'failed' ? '工具执行失败，等待输出。' :
+			entry.state === 'done' ? '工具执行完成，等待输出。' : '等待工具执行结果。';
+	}
+
+	/** 把绝对路径裁成相对工作目录的显示路径；裁不动时原样返回。 */
+	function displayPath(path) {
+		const value = String(path || '').trim();
+		const root = cwd.replace(/[\\/]+$/, '');
+		if (!value || !root || !value.startsWith(root)) return value;
+		return value.slice(root.length).replace(/^[\\/]+/, '') || value;
+	}
+
+	/** 解析工具参数；被截断或不是对象时返回 null，调用方据此退回通用展示。 */
+	function toolArgs(entry) {
+		if (!entry.args) return null;
+		try {
+			const parsed = JSON.parse(entry.args);
+			return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+		} catch {
+			return null;
+		}
+	}
+
+	/** 去掉末尾空行后的内容行；write 的预览与统计共用。 */
+	function contentLines(content) {
+		const lines = String(content == null ? '' : content).split('\n');
+		let end = lines.length;
+		while (end > 0 && lines[end - 1] === '') end -= 1;
+		return lines.slice(0, end);
+	}
+
+	/** 改动量：edit 数 diff 的行首符号，write 把内容行数当新增（拿不到旧文件）。 */
+	function changeCounts(entry) {
+		if (entry.name === 'write') {
+			const content = toolArgs(entry)?.content;
+			return typeof content === 'string' ? { add: contentLines(content).length, del: 0 } : null;
+		}
+		if (!entry.diff) return null;
+		let add = 0;
+		let del = 0;
+		for (const line of entry.diff.split('\n')) {
+			if (line.startsWith('+')) add += 1;
+			else if (line.startsWith('-')) del += 1;
+		}
+		return add || del ? { add, del } : null;
+	}
+
+	/** 拆解展示用 diff 的一行：符号 + 行号 + 内容；行号为空且内容是 `...` 的是跳过标记。 */
+	function parseDiffLine(line) {
+		const match = /^([+\-\s])(\s*\d*)\s(.*)$/.exec(line);
+		if (!match) return { kind: 'ctx', num: '', text: line };
+		const num = match[2].trim();
+		if (!num && match[3].trim() === '...') return { kind: 'skip', num: '', text: '...' };
+		return { kind: match[1] === '+' ? 'add' : match[1] === '-' ? 'del' : 'ctx', num, text: match[3] };
+	}
+
+	/** 追加一行 diff；行号列与符号列宽度固定，内容保留原始空白。 */
+	function addDiffLine(container, numText, signText, kind, textText) {
+		const row = document.createElement('div');
+		row.className = 'diff-line';
+		row.dataset.k = kind;
+		const num = document.createElement('span');
+		num.className = 'diff-num';
+		num.textContent = numText;
+		const sign = document.createElement('span');
+		sign.className = 'diff-sign';
+		sign.textContent = signText;
+		const text = document.createElement('span');
+		text.className = 'diff-text';
+		text.textContent = textText;
+		row.append(num, sign, text);
+		container.append(row);
+	}
+
+	/** edit 用权威 diff，write 用内容预览（全部按新增），两者都缺时给一句说明。 */
+	function renderFileBody(entry, diffEl, args) {
+		diffEl.replaceChildren();
+		if (entry.diff) {
+			for (const line of entry.diff.split('\n')) {
+				const parsed = parseDiffLine(line);
+				const sign = parsed.kind === 'add' ? '+' : parsed.kind === 'del' ? '-' : ' ';
+				addDiffLine(diffEl, parsed.num, sign, parsed.kind, parsed.text);
+			}
+			return;
+		}
+		if (entry.name === 'write' && typeof args.content === 'string') {
+			const lines = contentLines(args.content);
+			lines.slice(0, WRITE_PREVIEW_LINES).forEach((line, index) => addDiffLine(diffEl, String(index + 1), '+', 'add', line));
+			if (lines.length > WRITE_PREVIEW_LINES) {
+				const more = document.createElement('div');
+				more.className = 'diff-more';
+				more.textContent = '… 还有 ' + (lines.length - WRITE_PREVIEW_LINES) + ' 行（共 ' + lines.length + ' 行）';
+				diffEl.append(more);
+			}
+			return;
+		}
+		const note = document.createElement('div');
+		note.className = 'diff-more';
+		note.textContent = entry.hasResult ? '本次调用没有可展示的改动内容。' : '等待工具执行结果。';
+		diffEl.append(note);
+	}
+
+	/** edit / write 的摘要与正文：路径、改动量、diff 或内容预览；成功后收起原始参数与确认语。 */
+	function renderFileTool(entry) {
+		const args = toolArgs(entry);
+		if (!args) return false;
+		const rawPath = String(args.path || '');
+		entry.argsEl.textContent = displayPath(rawPath) || '未提供路径';
+		entry.argsEl.title = rawPath;
+		if (!entry.statsEl) {
+			entry.statsEl = document.createElement('span');
+			entry.statsEl.className = 'tool-stats';
+			entry.argsEl.after(entry.statsEl);
+		}
+		const counts = changeCounts(entry);
+		entry.statsEl.replaceChildren();
+		entry.statsEl.hidden = !counts;
+		if (counts) {
+			const plus = document.createElement('span');
+			plus.className = 'plus';
+			plus.textContent = '+' + counts.add;
+			const minus = document.createElement('span');
+			minus.className = 'minus';
+			minus.textContent = '−' + counts.del;
+			entry.statsEl.append(plus, minus);
+		}
+		if (!entry.diffEl) {
+			entry.diffEl = document.createElement('div');
+			entry.diffEl.className = 'tool-diff';
+			entry.argumentsEl.before(entry.diffEl);
+		}
+		entry.diffEl.hidden = false;
+		renderFileBody(entry, entry.diffEl, args);
+		// 改动内容已经说明问题：成功后不再重复参数 JSON 与「已写入」这类确认语
+		const settled = entry.hasResult && entry.state !== 'failed';
+		entry.argumentsEl.hidden = settled || !entry.args;
+		entry.argsPre.textContent = entry.args;
+		entry.output.hidden = settled;
+		entry.outputLabel.hidden = settled;
+		if (!settled) refreshOutput(entry);
+		return true;
+	}
+
 	/** 刷新单条记录；失败首次出现时展开，后续更新不覆盖用户的折叠选择。 */
 	function refreshToolEntry(entry) {
 		const wasFailed = entry.details.dataset.state === 'failed';
@@ -283,21 +445,19 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		entry.marker.textContent = mark;
 		entry.nameEl.textContent = entry.name || 'tool';
 		entry.nameEl.title = entry.name || 'tool';
-		entry.argsEl.textContent = entry.args ? firstLine(entry.args) : entry.hasCall ? '参数未提供' : '未匹配到调用';
-		entry.argsEl.title = entry.args || '';
 		entry.chip.dataset.state = entry.state;
 		entry.chip.textContent = label;
-		entry.argumentsEl.hidden = !entry.args;
-		entry.argsPre.textContent = entry.args;
-		if (entry.hasResult) {
-			const lines = entry.text ? entry.text.split('\n').length : 0;
-			entry.outputLabel.textContent = '输出 · ' + lines + ' 行 · ' + new TextEncoder().encode(entry.text).length + ' 字节';
-			entry.output.textContent = entry.text || '（空输出）';
-		} else {
-			entry.outputLabel.textContent = '输出';
-			entry.output.textContent = entry.state === 'unknown' ? '未收到工具结果，无法确认本次调用的完整输出。' :
-				entry.state === 'failed' ? '工具执行失败，等待输出。' :
-				entry.state === 'done' ? '工具执行完成，等待输出。' : '等待工具执行结果。';
+		// 文件类工具参数不可用时退回通用展示，绝不把截断内容当成路径或改动
+		if (!(FILE_TOOLS.has(entry.name) && renderFileTool(entry))) {
+			if (entry.statsEl) entry.statsEl.hidden = true;
+			if (entry.diffEl) entry.diffEl.hidden = true;
+			entry.argsEl.textContent = entry.args ? firstLine(entry.args) : entry.hasCall ? '参数未提供' : '未匹配到调用';
+			entry.argsEl.title = entry.args || '';
+			entry.argumentsEl.hidden = !entry.args;
+			entry.argsPre.textContent = entry.args;
+			entry.output.hidden = false;
+			entry.outputLabel.hidden = false;
+			refreshOutput(entry);
 		}
 		if (entry.state === 'failed' && !wasFailed) entry.details.open = true;
 		refreshToolPanel(entry.details.closest('.execution-panel'));
@@ -342,7 +502,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		content.append(argumentsEl, outputLabel, output);
 		details.append(summary, content);
 		const entry = {
-			id, name: name || 'tool', args: '', text: '', state: 'pending', hasCall: false, hasResult: false,
+			id, name: name || 'tool', args: '', text: '', diff: '', state: 'pending', hasCall: false, hasResult: false,
 			details, marker, nameEl, argsEl, chip, argumentsEl, argsPre, outputLabel, output,
 		};
 		// 无 ID 的记录也能从 DOM 找回，用于中断处理和落定时保留孤立输出。
@@ -395,6 +555,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		const entry = getToolEntry(message.toolCallId, message.toolName || message.name);
 		entry.hasResult = true;
 		entry.text = String(message.text || '');
+		if (typeof message.diff === 'string' && message.diff) entry.diff = message.diff;
 		if (typeof message.isError === 'boolean') entry.state = message.isError ? 'failed' : 'done';
 		else if (entry.state !== 'done' && entry.state !== 'failed') entry.state = 'unknown';
 		refreshToolEntry(entry);
@@ -589,6 +750,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		const entry = getToolEntry(detail.toolCallId, detail.toolName || detail.name);
 		entry.hasCall = true;
 		if (typeof detail.arguments === 'string') entry.args = detail.arguments;
+		if (typeof detail.diff === 'string' && detail.diff) entry.diff = detail.diff;
 		if (!entry.hasResult && (entry.state === 'pending' || entry.state === 'unknown')) entry.state = 'running';
 		refreshToolEntry(entry);
 		if (!entry.details.isConnected && pendingAssistant) placeToolEntry(pendingAssistant.body, entry);
@@ -605,6 +767,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			entry.state = typeof detail.isError === 'boolean' ? (detail.isError ? 'failed' : 'done') :
 				/error|fail|cancel|abort/i.test(String(detail.status || '') + ' ' + String(detail.reason || '')) ? 'failed' : 'unknown';
 		}
+		if (typeof detail.diff === 'string' && detail.diff) entry.diff = detail.diff;
 		refreshToolEntry(entry);
 		attachStandaloneTool(entry);
 	}
@@ -720,11 +883,16 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		thinkingRow = null;
 	}
 
+	/** 接收会话上下文，只取工作目录用于工具路径显示。 */
+	function setContext(context) {
+		cwd = String(context?.cwd || '');
+	}
+
 	/** 帧处理后按处理前的滚动意图跟随底部，并更新跳转按钮。 */
 	function followFrame(follow) {
 		if (follow) messagesEl.scrollTop = messagesEl.scrollHeight;
 		syncJumpButtons();
 	}
 
-	return { clearMessages, showEmptyHint, addStatusRow, addUserMessage, handleFrame, resumeTurn, finishTurn, followFrame, pinnedToBottom, startToolRow, endToolRow };
+	return { clearMessages, showEmptyHint, addStatusRow, addUserMessage, handleFrame, resumeTurn, finishTurn, followFrame, pinnedToBottom, startToolRow, endToolRow, setContext };
 }

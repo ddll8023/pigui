@@ -33,6 +33,11 @@
 	--tool-surface: #f8fbfa;
 	--tool-hover: #edf4f1;
 	--tool-badge-bg: #ffffff80;
+	/* diff 展示取色：新增与删除行只在这里定义，暗色主题另行覆盖。 */
+	--diff-add: #1f6b4a;
+	--diff-add-bg: #eaf4ee;
+	--diff-del: #a5331f;
+	--diff-del-bg: #fbeeeb;
 	--topbar-bg: #f7f9fb;
 	--toolbar-bg: #f8fafb;
 	--table-stripe: #fafbfb;
@@ -112,6 +117,10 @@
 	--tool-surface: #1d2c34;
 	--tool-hover: #2a3f45;
 	--tool-badge-bg: #1c263280;
+	--diff-add: #7ccfa8;
+	--diff-add-bg: #1f342a;
+	--diff-del: #f3a899;
+	--diff-del-bg: #3a2a2b;
 	--topbar-bg: #19222d;
 	--toolbar-bg: #202c38;
 	--table-stripe: #202c38;

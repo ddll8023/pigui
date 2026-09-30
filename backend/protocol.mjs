@@ -62,6 +62,15 @@ export function skillCommandText(text, parseSkill) {
 }
 
 /**
+ * 工具结果里的展示用 diff（目前只有 edit 带），按内容块上限截断，避免大改动把单帧撑爆。
+ */
+function toolDiffOf(result) {
+	const diff = result?.details?.diff;
+	if (typeof diff !== 'string' || !diff) return '';
+	return diff.length > MAX_BLOCK_TEXT ? `${diff.slice(0, MAX_BLOCK_TEXT)}\n…（diff 已截断，原文 ${diff.length} 字节）` : diff;
+}
+
+/**
  * 把 pi 的消息压成 { role, text, blocks }。
  *
  * blocks 保留每块的类型（thinking / text / toolCall / toolResult / …）与 toolCallId，
@@ -150,6 +159,8 @@ export function messageView(message, entryId = '', parseSkill) {
 		view.toolCallId = typeof message?.toolCallId === 'string' ? message.toolCallId : '';
 		view.toolName = typeof message?.toolName === 'string' ? message.toolName : '';
 		view.isError = Boolean(message?.isError);
+		const diff = toolDiffOf(message);
+		if (diff) view.diff = diff;
 	}
 	return view;
 }
@@ -249,6 +260,11 @@ export function eventFrame(event, extra, parseSkill) {
 			detail.arguments = args.length > MAX_BLOCK_TEXT ? `${args.slice(0, MAX_BLOCK_TEXT)}\n…（参数已截断）` : args;
 		}
 	}
-	if (event.type === 'tool_execution_end' && typeof event.isError === 'boolean') detail.isError = event.isError;
+	if (event.type === 'tool_execution_end') {
+		if (typeof event.isError === 'boolean') detail.isError = event.isError;
+		// 结果对象里有 edit 的展示用 diff，工具一结束就能画出来，不必等消息落定
+		const diff = toolDiffOf(event.result);
+		if (diff) detail.diff = diff;
+	}
 	return { kind: 'event', type: event.type, detail };
 }

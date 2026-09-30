@@ -107,6 +107,7 @@ function renderContext(context) {
 		context.sessionFile,
 	].filter(Boolean).join('\n');
 	sessions.setContext(context);
+	messages.setContext(context);
 	usage.setContext(context);
 	models.setContext(context);
 	// 技能 / 提示模板 / 插件命令由服务端会话帧给出，页面只把它们并进 `/` 提示条
