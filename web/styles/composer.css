@@ -1,0 +1,201 @@
+/* ---------- 输入坞：完整输入行 + 独立的用量与操作工具栏 ---------- */
+#composer { flex: none; padding: 8px var(--stage-pad); background: var(--bg); }
+.composer-box {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 6px;
+	max-width: var(--composer-max);
+	margin: 0 auto;
+	padding: 8px 16px 0;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--surface-radius);
+	box-shadow: var(--dock-shadow);
+	transition: border-color var(--motion-fast) ease-out, box-shadow var(--motion-fast) ease-out;
+}
+.composer-box:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 2px; }
+#input { grid-area: 2 / 1; resize: none; min-width: 0; min-height: 36px; max-height: 200px; padding: 4px 0 8px; border: 0; background: transparent; color: inherit; font: 14px/1.6 var(--sans); overflow-y: hidden; }
+#input::placeholder { color: var(--faint); }
+#input:focus { outline: none; }
+.composer-toolbar { grid-area: 3 / 1; display: flex; align-items: center; gap: 12px; min-width: 0; margin: 0 -16px; padding: 6px 16px; border-top: 1px solid var(--line); border-radius: 0 0 var(--surface-radius) var(--surface-radius); background: var(--toolbar-bg); }
+.composer-actions { display: flex; flex: none; align-items: center; gap: 7px; }
+#attach { width: 34px; height: 34px; padding: 0; font-size: 18px; line-height: 1; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
+#attach:hover { background: var(--think-bg); }
+/* 状态与用量占据工具栏左侧；操作组固定在右侧，不压缩发送按钮。 */
+.composer-meta {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 2px 12px;
+	min-height: 15px;
+}
+.usage {
+	flex: 1 1 auto;
+	min-width: 0;
+	justify-content: flex-start;
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 2px 10px;
+	min-height: 15px;
+	overflow-wrap: anywhere;
+	font: 10px/1.5 var(--mono);
+	color: var(--muted);
+	cursor: pointer;
+}
+.usage:hover { color: var(--text); }
+.usage:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.usage .rate { color: var(--accent); }
+.usage .warn { color: var(--tool); }
+.usage .danger { color: var(--accent); }
+.usage .badge { color: var(--tool); }
+
+/* ---------- 待发附件（图片缩略图 / 文本文件名） ---------- */
+.attach-strip {
+	grid-area: 1 / 1 / auto / -1;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding-bottom: 4px;
+}
+.attach-strip[hidden] {
+	display: none;
+}
+.attach-chip {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	max-width: min(260px, 100%);
+	padding: 3px 4px 3px 6px;
+	background: var(--think-bg);
+	border: 1px solid var(--line);
+	border-radius: 4px;
+}
+.attach-thumb {
+	width: 28px;
+	height: 28px;
+	object-fit: cover;
+	border-radius: 3px;
+	border: 1px solid var(--line);
+}
+.attach-name {
+	font: 11px/1.4 var(--mono);
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.attach-remove {
+	padding: 2px 5px;
+	font-size: 12px;
+	line-height: 1;
+	color: var(--faint);
+}
+.attach-remove:hover {
+	color: var(--accent);
+	background: transparent;
+}
+
+/* ---------- 命令提示条（输入 / 时出现） ---------- */
+.cmdbar {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: calc(100% + 8px);
+	z-index: 9;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: 6px;
+	box-shadow: var(--floating-shadow);
+	overflow: hidden;
+}
+.cmdbar[hidden] {
+	display: none;
+}
+.cmd-list {
+	list-style: none;
+	margin: 0;
+	padding: 4px 0;
+}
+.cmd-item {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 0 10px;
+	align-items: baseline;
+	padding: 7px 12px;
+	cursor: pointer;
+}
+.cmd-item:hover {
+	background: var(--think-bg);
+}
+.cmd-item[data-active="true"] {
+	background: var(--think-bg);
+	box-shadow: inset 2px 0 0 var(--accent);
+}
+.cmd-item .name {
+	font: 12.5px/1.6 var(--mono);
+	color: var(--text);
+}
+.cmd-item .desc {
+	font: 11.5px/1.6 var(--mono);
+	color: var(--faint);
+}
+
+/* ---------- @ 引用文件提示条 ---------- */
+#filebar {
+	max-height: 264px;
+	overflow-y: auto;
+}
+.cmd-item .path {
+	font: 12.5px/1.6 var(--mono);
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.cmd-item[data-dir="true"] .path {
+	color: var(--accent);
+}
+.file-empty {
+	padding: 7px 12px;
+	font: 11.5px/1.6 var(--mono);
+	color: var(--faint);
+}
+
+.plugin-widget {
+	max-width: var(--composer-max);
+	margin: 0 auto 6px;
+	padding: 6px 9px;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+	background: var(--panel);
+	font: 11px/1.5 var(--mono);
+	color: var(--muted);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.plugin-widget:last-child {
+	margin-bottom: 0;
+}
+.plugin-status {
+	flex: 0 1 auto;
+	min-width: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px 12px;
+	font: 10px/1.5 var(--mono);
+	color: var(--muted);
+}
+/* display:flex 会盖掉 UA 的 [hidden]，空状态下要显式关掉 */
+.plugin-status[hidden] {
+	display: none;
+}
+.plugin-status .item {
+	max-width: min(42vw, 320px);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

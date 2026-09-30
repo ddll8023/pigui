@@ -1,0 +1,319 @@
+/* 【设计说明】分层 AI 工作台：上下文顶栏、独立阅读面板、分区输入操作坞。
+   —— 内容区上限 1440px（--stage-max），阅读面板与输入坞共用左右边界；
+      用户右置气泡、AI 开放式正文，保留紧凑的阅读密度；
+   —— 工具调用按 ID 关联输出，连续调用归组，正文和思考仍保持原有顺序；
+   —— 正红只用于运行、发送、错误与焦点，青色只用于思考与工具；
+   —— 浅色 / 深色共用语义色令牌，默认跟随系统，手动选择保存在当前地址；
+      系统字体、无外部视觉资源，主题切换不改变布局与会话。 */
+:root {
+	color-scheme: light;
+	--bg: #e8edf2;
+	--panel: #ffffff;
+	--line: #dde4eb;
+	--line-strong: #c7d2dc;
+	--text: #263543;
+	--muted: #596b7b;
+	--faint: #697b89;
+	--surface-shadow: 0 2px 4px #26354304, 0 12px 32px -20px #26354330;
+	--dock-shadow: 0 2px 6px #26354306, 0 14px 32px -16px #26354335;
+	--surface-radius: 16px;
+	--motion-fast: 160ms;
+	--accent: #c2402a;
+	--accent-dark: #a5331f;
+	--accent-rgb: 194, 64, 42;
+	--on-accent: #ffffff;
+	--accent-soft: #fff3f0;
+	--accent-line: #ebc7bf;
+	--accent-strong-bg: #f9e6e0;
+	--tool: #286d65;
+	--tool-rgb: 40, 109, 101;
+	--think-bg: #f3f6f8;
+	--tool-bg: #eaf3f0;
+	--tool-line: #d1dfda;
+	--tool-surface: #f8fbfa;
+	--tool-hover: #edf4f1;
+	--tool-badge-bg: #ffffff80;
+	--topbar-bg: #f7f9fb;
+	--toolbar-bg: #f8fafb;
+	--table-stripe: #fafbfb;
+	/* 品牌与用户气泡使用独立颜色，避免深色主题把它们反转成白底。 */
+	--strong-bg: #263543;
+	--strong-text: #f5f7f8;
+	--strong-muted: #c7d0d5;
+	--strong-line: #ffffff30;
+	--strong-edge: #ffffff20;
+	--strong-highlight: #ffffff18;
+	--strong-wash: #ffffff0c;
+	--strong-code-bg: #ffffff14;
+	--strong-code-line: #ffffff25;
+	--strong-shadow: 0 3px 8px #26354312;
+	--brand-shadow: 0 4px 12px #26354318;
+	--send-shadow: inset 0 1px 0 #ffffff26, 0 2px 4px #a5331f18;
+	--floating-shadow: 0 12px 28px rgba(22, 25, 28, 0.16);
+	--jump-shadow: 0 6px 16px rgba(22, 25, 28, 0.12);
+	--scroll-thumb: #d7dbde;
+	--scroll-thumb-hover: #bfc5c9;
+	--usage-track: rgba(43, 54, 62, 0.1);
+	/* 两套代码色板分别控制亮度，用户气泡内继续继承气泡正文色。 */
+	--tok-comment: #697b89;
+	--tok-string: #2f7d75;
+	--tok-number: #94601f;
+	--tok-keyword: #a5331f;
+	--tok-key: #2e4a87;
+	--sans: "Segoe UI Variable Text", "Segoe UI", system-ui, "Microsoft YaHei UI", sans-serif;
+	--mono: "Cascadia Mono", "Cascadia Code", ui-monospace, Consolas, monospace;
+	--gutter: 34px;
+	/* 版式宽度：内容上限 + 随窗口缩放的左右留白（输入区与消息区共用，左右边界才能对齐） */
+	--stage-max: 1440px;
+	--stage-pad: clamp(12px, 2.4vw, 32px);
+	--composer-max: calc(var(--stage-max) - 2 * var(--stage-pad));
+	/* 长文本行宽上限：大屏下不让用户提问的气泡一行拉满 */
+	--line-max: 90ch;
+	/* 浮层（纸面）令牌：圆角、极细描边、双层柔影、遮罩、入场动效 */
+	--sheet-radius: 16px;
+	--sheet-line: rgba(43, 54, 62, 0.07);
+	--sheet-shadow: 0 2px 6px rgba(22, 25, 28, 0.1), 0 32px 64px -24px rgba(22, 25, 28, 0.42);
+	/* 浮层内顶边 1px 高光：浅色底上把纸面“抬”起来 */
+	--sheet-hairline: rgba(255, 255, 255, 0.9);
+	--scrim: rgba(22, 25, 28, 0.45);
+	--sheet-enter: 160ms;
+	/* 选中块的内缩圆角 */
+	--sheet-item-radius: 10px;
+	/* 浮层宽度分档：插件对话框 / 列表类内容 / 多块内容（额度） */
+	--sheet-w: clamp(320px, 92vw, 560px);
+	--sheet-w-list: clamp(320px, 92vw, 640px);
+	--sheet-w-wide: clamp(320px, 94vw, 720px);
+	/* 浮层横向留白：头部、列表、字段、底部统一用这一个值 */
+	--sheet-pad-x: 14px;
+}
+:root[data-theme="dark"] {
+	color-scheme: dark;
+	--bg: #141b24;
+	--panel: #1c2632;
+	--line: #334354;
+	--line-strong: #485d72;
+	--text: #e6edf3;
+	--muted: #b0bfcd;
+	--faint: #9cabb9;
+	--surface-shadow: 0 2px 6px #00000018, 0 12px 32px -20px #00000070;
+	--dock-shadow: 0 2px 8px #00000024, 0 14px 32px -16px #00000080;
+	--accent: #ed8f7e;
+	--accent-dark: #f3a899;
+	--accent-rgb: 237, 143, 126;
+	--on-accent: #19222c;
+	--accent-soft: #352d32;
+	--accent-line: #73514f;
+	--accent-strong-bg: #473238;
+	--tool: #84c8b8;
+	--tool-rgb: 132, 200, 184;
+	--think-bg: #24313f;
+	--tool-bg: #223b3b;
+	--tool-line: #3b5859;
+	--tool-surface: #1d2c34;
+	--tool-hover: #2a3f45;
+	--tool-badge-bg: #1c263280;
+	--topbar-bg: #19222d;
+	--toolbar-bg: #202c38;
+	--table-stripe: #202c38;
+	--strong-bg: #304253;
+	--strong-shadow: 0 3px 8px #00000020;
+	--brand-shadow: 0 4px 12px #00000028;
+	--send-shadow: inset 0 1px 0 #ffffff26, 0 2px 4px #00000024;
+	--floating-shadow: 0 12px 28px #00000050;
+	--jump-shadow: 0 6px 16px #00000040;
+	--scroll-thumb: #485d72;
+	--scroll-thumb-hover: #60778d;
+	--usage-track: #3b4c5d;
+	--tok-comment: #9cabb9;
+	--tok-string: #84c8b8;
+	--tok-number: #e4bd83;
+	--tok-keyword: #ed9d8d;
+	--tok-key: #9fbdf3;
+	--sheet-line: #425366;
+	--sheet-shadow: 0 2px 6px #00000030, 0 32px 64px -24px #000000b0;
+	--sheet-hairline: #ffffff0c;
+	--scrim: rgba(5, 10, 16, 0.68);
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+body {
+	display: flex;
+	flex-direction: column;
+	height: 100dvh;
+	background: var(--bg);
+	color: var(--text);
+	font: 14px/1.7 var(--sans);
+	-webkit-font-smoothing: antialiased;
+}
+::selection {
+	background: rgba(var(--tool-rgb), 0.24);
+}
+::-webkit-scrollbar {
+	width: 10px;
+	height: 10px;
+}
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+::-webkit-scrollbar-thumb {
+	background: var(--scroll-thumb);
+	border: 3px solid transparent;
+	background-clip: content-box;
+	border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--scroll-thumb-hover);
+	background-clip: content-box;
+}
+
+/* ---------- 顶栏：工作区信息 / 模型状态组 / 操作组 ---------- */
+.topbar {
+	flex: none;
+	min-height: 62px;
+	padding: 10px 0;
+	background: var(--topbar-bg);
+	border-bottom: 1px solid var(--line);
+}
+/* 顶栏分组的外边界与阅读面板、输入坞对齐。 */
+.topbar-inner {
+	display: flex;
+	align-items: center;
+	gap: 16px;
+	width: min(100%, var(--stage-max));
+	margin: 0 auto;
+	padding: 0 var(--stage-pad);
+}
+.brand {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font: 750 22px/1 var(--sans);
+	letter-spacing: -1px;
+}
+.brand-mark {
+	display: grid;
+	place-items: center;
+	width: 34px;
+	height: 34px;
+	border: 1px solid var(--strong-edge);
+	border-radius: 11px;
+	background: var(--strong-bg);
+	color: var(--strong-text);
+	box-shadow: inset 0 1px 0 var(--strong-highlight);
+}
+.brand-name { color: var(--muted); font-size: 17px; font-weight: 500; letter-spacing: -0.6px; }
+.project { flex: 1; min-width: 0; padding-left: 16px; border-left: 1px solid var(--line-strong); }
+.meta, .project-path {
+	display: block;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.meta { font: 600 12px/1.5 var(--sans); }
+.project-path { color: var(--muted); font: 10px/1.5 var(--mono); }
+.model-group {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	max-width: 38%;
+	padding: 8px 10px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	background: var(--panel);
+}
+.model-info {
+	flex: 1;
+	min-width: 0;
+	color: var(--text);
+	font: 11px/1.4 var(--mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.topbar-actions { display: flex; gap: 3px; flex: none; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.topbar-actions button { border-radius: 7px; }
+#new { color: var(--text); font-weight: 600; background: var(--think-bg); }
+#new:hover { background: var(--line); }
+#abort:hover { color: var(--accent); background: var(--accent-soft); }
+#themeToggle { min-width: 44px; color: var(--text); }
+.state {
+	flex: none;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font: 10.5px/1 var(--mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--faint);
+	padding-left: 10px;
+	border-left: 1px solid var(--line);
+}
+.state .dot {
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: var(--line-strong);
+}
+.state[data-busy="true"] {
+	color: var(--accent);
+}
+.state[data-busy="true"] .dot {
+	background: var(--accent);
+	animation: breathe 1.6s ease-in-out infinite;
+}
+@keyframes breathe {
+	0%,
+	100% {
+		opacity: 1;
+		transform: scale(1);
+	}
+	50% {
+		opacity: 0.4;
+		transform: scale(0.82);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.state[data-busy="true"] .dot {
+		animation: none;
+	}
+}
+
+/* ---------- 按钮：轻量次级操作，发送键是唯一的强调色实心按钮 ---------- */
+button {
+	font: 12px/1 var(--sans);
+	color: var(--muted);
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: 7px;
+	padding: 7px 10px;
+	cursor: pointer;
+	transition: background var(--motion-fast) ease-out, color var(--motion-fast) ease-out, border-color var(--motion-fast) ease-out;
+}
+button:hover {
+	background: var(--think-bg);
+	color: var(--text);
+}
+button:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+#send {
+	background: var(--accent);
+	color: var(--on-accent);
+	font-weight: 600;
+	padding: 10px 18px;
+	border-radius: 9px;
+	box-shadow: var(--send-shadow);
+}
+#send:hover {
+	background: var(--accent-dark);
+	color: var(--on-accent);
+}

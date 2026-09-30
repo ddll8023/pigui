@@ -1,0 +1,433 @@
+/* ---------- 额度浮层（点开用量行） ---------- */
+.usage-body {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	max-height: 62vh;
+	overflow-y: auto;
+	padding: 4px var(--sheet-pad-x) 12px;
+}
+.usage-section {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	background: var(--think-bg);
+}
+.usage-section h4 {
+	margin: 0 0 4px;
+	font: 11px/1.5 var(--mono);
+	letter-spacing: 0.04em;
+	color: var(--faint);
+}
+.usage-line {
+	font: 12px/1.7 var(--mono);
+	color: var(--text);
+}
+.usage-line .name { color: var(--muted); }
+.usage-note {
+	font: 11px/1.6 var(--mono);
+	color: var(--muted);
+}
+.usage-note.error { color: var(--accent); }
+.usage-note.warn { color: var(--tool); }
+/* 指标行：标签淡、数值实（↑ 12.3K 这种） */
+.usage-metrics {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	font: 12px/1.7 var(--mono);
+}
+.metric {
+	display: inline-flex;
+	align-items: baseline;
+	gap: 3px;
+	color: var(--muted);
+}
+.metric b {
+	color: var(--text);
+	font-weight: 600;
+	font-variant-numeric: tabular-nums;
+}
+/* 进度行：标签 | 条 | 百分比 | 重置倒计时 */
+.usage-row {
+	display: grid;
+	grid-template-columns: 64px minmax(0, 1fr) minmax(54px, max-content) auto;
+	align-items: center;
+	gap: 0 10px;
+	font: 12px/1.7 var(--mono);
+	color: var(--text);
+}
+.usage-label {
+	color: var(--muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.usage-bar {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--usage-track);
+	overflow: hidden;
+}
+.usage-fill {
+	display: block;
+	height: 100%;
+	border-radius: 999px;
+	background: var(--tool);
+	transition: width 200ms ease-out;
+}
+/* 三档：正常青 / 警告淡红 / 危险正红（与页面错误色一致） */
+.usage-fill.warn { background: rgba(var(--accent-rgb), 0.45); }
+.usage-fill.danger { background: var(--accent); }
+.usage-value {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.usage-when {
+	font-size: 11px;
+	color: var(--faint);
+	white-space: nowrap;
+}
+.usage-when:empty { display: none; }
+/* 窄屏保留数值的完整宽度，把重置说明移到进度条下方。 */
+@media (max-width: 560px) {
+	.usage-row { grid-template-columns: 54px minmax(0, 1fr) minmax(54px, max-content); gap: 4px 8px; }
+	.usage-when { grid-column: 2 / -1; text-align: right; white-space: normal; overflow-wrap: anywhere; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.usage-fill { transition: none; }
+}
+#usageFoot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+
+/* ---------- 浮层内容：两行式条目 ---------- */
+.picker-item.two-line { grid-template-columns: 26px minmax(0, 1fr); }
+.picker-item .main {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 0;
+	padding: 9px 0;
+}
+.picker-item .title {
+	min-width: 0;
+	font-size: 13px;
+	color: var(--text);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* 目录/回退的提问文本允许最多两行 */
+.picker-item .title.clamp-2 {
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	white-space: normal;
+}
+.picker-item .meta {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 3px 8px;
+	min-width: 0;
+	font: 11px/1.5 var(--mono);
+	color: var(--faint);
+}
+/* 小标签胶囊：provider / 思考 / 200K / 默认 / 当前位置 */
+.chip {
+	padding: 1px 6px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--panel);
+	color: var(--muted);
+	font: 10.5px/1.6 var(--mono);
+	white-space: nowrap;
+}
+.chip.accent {
+	border-color: rgba(var(--accent-rgb), 0.35);
+	color: var(--accent);
+}
+/* 序号胶囊（目录 / 回退 / 插件选项） */
+.mark.idx {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 22px;
+	height: 18px;
+	padding: 0 5px;
+	border-radius: 6px;
+	background: var(--think-bg);
+	color: var(--muted);
+	font: 10.5px/1 var(--mono);
+}
+.picker-item[data-active="true"] .mark.idx {
+	background: rgba(var(--accent-rgb), 0.12);
+	color: var(--accent);
+}
+/* 目录里“当前可视区域第一条” */
+.picker-item[data-viewport="true"] { border-left-color: var(--line-strong); }
+/* 会话列表的分组标题（今天 / 昨天 / 更早） */
+.picker-group {
+	margin: 0 4px;
+	padding: 8px 7px 4px;
+	font: 10.5px/1.4 var(--mono);
+	letter-spacing: 0.08em;
+	color: var(--faint);
+}
+/* confirm 对话框里默认高亮的那一项（确认） */
+.picker-item.confirm-primary .title {
+	color: var(--accent);
+	font-weight: 600;
+}
+/* 插件对话框的超时进度 */
+.ui-timeout {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+.ui-timeout-track {
+	flex: none;
+	width: 120px;
+	height: 4px;
+	border-radius: 999px;
+	background: rgba(var(--accent-rgb), 0.18);
+	overflow: hidden;
+}
+.ui-timeout-fill {
+	display: block;
+	height: 100%;
+	border-radius: 999px;
+	background: var(--accent);
+	transition: width 200ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+	.ui-timeout-fill { transition: none; }
+}
+
+/* ---------- 会话选择器（/resume） ---------- */
+.overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 10;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+	padding: clamp(24px, 7vh, 56px) var(--stage-pad) 16px;
+	background: var(--scrim);
+	/* 模糊吃 GPU：远程桌面/低端机发卡的话降回 blur(2px) */
+	backdrop-filter: blur(6px) saturate(1.05);
+}
+.overlay[hidden] {
+	display: none;
+}
+.picker {
+	display: flex;
+	flex-direction: column;
+	width: var(--sheet-w);
+	max-height: 68vh;
+	background: var(--panel);
+	border: 1px solid var(--sheet-line);
+	border-radius: var(--sheet-radius);
+	box-shadow: inset 0 1px 0 var(--sheet-hairline), var(--sheet-shadow);
+	overflow: hidden;
+	transform-origin: top center;
+	animation: sheetIn var(--sheet-enter) cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+/* 容器只为程序性聚焦，不画焦点环；环留给内部真正可操作的控件 */
+.picker:focus { outline: none; }
+.picker.w-list { width: var(--sheet-w-list); }
+.picker.w-wide { width: var(--sheet-w-wide); }
+@keyframes sheetIn {
+	from { opacity: 0; transform: translateY(10px) scale(0.99); }
+	to { opacity: 1; transform: none; }
+}
+.picker-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	padding: 12px var(--sheet-pad-x);
+	border-bottom: 1px solid var(--line);
+}
+.picker-head-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.picker-title {
+	min-width: 0;
+	font: 600 13px/1.2 var(--sans);
+	color: var(--text);
+}
+.picker-key {
+	font: 11px/1.4 var(--mono);
+	color: var(--faint);
+}
+/* 关闭按钮与浮层里的小按钮共用一套 */
+.picker-close {
+	flex: none;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 8px;
+	color: var(--muted);
+	font: 12px/1 var(--sans);
+}
+.picker-close:hover {
+	background: rgba(var(--accent-rgb), 0.1);
+	color: var(--accent);
+}
+.sheet-btn {
+	padding: 4px 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: 10px;
+	color: var(--muted);
+	font: 11px/1.4 var(--mono);
+}
+.sheet-btn:hover {
+	background: var(--think-bg);
+	color: var(--text);
+}
+.sheet-btn:disabled {
+	opacity: 0.55;
+	cursor: default;
+}
+/* 窄屏：键位提示让位给关闭按钮 */
+@media (max-width: 560px) {
+	.picker-key { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.picker { animation: none; }
+}
+.picker-search {
+	flex: none;
+	margin: 12px var(--sheet-pad-x) 0;
+	padding: 9px 11px;
+	border: 1px solid var(--line-strong);
+	border-radius: 10px;
+	background: var(--panel);
+	color: var(--text);
+	font: 13px/1.4 var(--mono);
+}
+.picker-search:focus {
+	outline: none;
+	border-color: var(--accent);
+	box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.14);
+}
+.think-bar {
+	flex: none;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	padding: 12px var(--sheet-pad-x) 0;
+}
+.think-bar .think-label {
+	margin-right: 2px;
+	font: 10.5px/1 var(--mono);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--faint);
+}
+.think-chip {
+	padding: 4px 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: 999px;
+	background: var(--panel);
+	color: var(--muted);
+	font: 11px/1.5 var(--mono);
+	cursor: pointer;
+}
+.think-chip:hover {
+	background: var(--think-bg);
+}
+.think-chip[data-active="true"] {
+	border-color: var(--accent);
+	background: rgba(var(--accent-rgb), 0.07);
+	color: var(--accent);
+}
+.think-chip[data-plain="true"] {
+	cursor: default;
+	color: var(--faint);
+}
+.picker-list {
+	list-style: none;
+	margin: 0;
+	padding: 6px 0;
+	overflow-y: auto;
+}
+.picker-item {
+	display: grid;
+	grid-template-columns: 14px minmax(0, 1fr) auto;
+	gap: 0 10px;
+	align-items: center;
+	min-height: 40px;
+	/* 整块内缩：选中时用浅底 + 左红条标记，不需要额外的选中行背景 */
+	margin: 0 4px;
+	padding: 0 7px;
+	/* 预留红条位置，选中时文字不会左右跳动 */
+	border-left: 3px solid transparent;
+	border-radius: var(--sheet-item-radius);
+	cursor: pointer;
+}
+.picker-item:hover {
+	background: var(--think-bg);
+}
+.picker-item[data-active="true"] {
+	background: rgba(var(--accent-rgb), 0.08);
+	border-left-color: var(--accent);
+}
+.picker-item .mark {
+	color: var(--accent);
+	font: 10px/1.7 var(--mono);
+}
+.picker-item.plain {
+	grid-template-columns: minmax(0, 1fr);
+	padding: 8px 7px;
+	color: var(--faint);
+	font-size: 13px;
+	cursor: default;
+}
+.picker-item.plain:hover {
+	background: none;
+}
+.picker-foot {
+	padding: 10px var(--sheet-pad-x);
+	border-top: 1px solid var(--line);
+	font: 11px/1.4 var(--mono);
+	color: var(--faint);
+}
+
+/* ---------- 插件对话框与状态（扩展 UI） ---------- */
+.ui-message {
+	margin: 0;
+	padding: 12px var(--sheet-pad-x) 4px;
+	font-size: 13px;
+	line-height: 1.6;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.ui-message[hidden] {
+	display: none;
+}
+.ui-field {
+	flex: none;
+	margin: 12px var(--sheet-pad-x);
+	padding: 8px 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: 10px;
+	background: var(--panel);
+	color: var(--text);
+	font: 13px/1.5 var(--mono);
+	resize: vertical;
+}
+.ui-field:focus {
+	outline: none;
+	border-color: var(--accent);
+}
