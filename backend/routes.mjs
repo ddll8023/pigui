@@ -75,6 +75,7 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 						models: runtime.availableModels(),
 						thinkingLevel: runtime.getSession().thinkingLevel ?? null,
 						thinkingLevels: runtime.availableThinkingLevels(runtime.getSession()),
+						fast: runtime.fastInfo(),
 					},
 					{ 'content-type': 'application/json' },
 				);
@@ -212,6 +213,16 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				// setThinkingLevel 会按当前模型能力收敛；只改本会话，不写全局默认
 				runtime.getSession().setThinkingLevel(level);
 				runtime.broadcastSession();
+				return send(res, 200, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
+			}
+
+			if (route === 'POST /api/fast') {
+				const body = await readSessionBody(req);
+				if (typeof body?.enabled !== 'boolean') {
+					return send(res, 400, { error: 'enabled 必须是布尔值' }, { 'content-type': 'application/json' });
+				}
+				if (!runtime.getSession()) await runtime.boot();
+				runtime.setFast(body.enabled);
 				return send(res, 200, { context: runtime.sessionInfo() }, { 'content-type': 'application/json' });
 			}
 

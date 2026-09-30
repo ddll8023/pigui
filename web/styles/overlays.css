@@ -413,7 +413,7 @@
 }
 
 /* ---------- 插件对话框与状态（扩展 UI） ---------- */
-/* 插件对话框的标题常是整段提问：只占两行，键位提示与关闭按钮不被挤成竖排 */
+/* 插件标题只标识交互类型；完整提问放在下方可滚动正文中。 */
 #uiOverlay .picker-head {
 	align-items: flex-start;
 }
@@ -425,10 +425,6 @@
 	white-space: nowrap;
 }
 #uiOverlay .picker-title {
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
 	line-height: 1.35;
 }
 .ui-message {
@@ -441,6 +437,7 @@
 }
 /* 问题本身可能很长：自己滚动，不把下面的选项挤出视口 */
 #uiOverlay .ui-message {
+	min-height: 0;
 	max-height: 34vh;
 	overflow-y: auto;
 }

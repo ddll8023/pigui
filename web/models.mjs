@@ -1,4 +1,4 @@
-/** 模型与思考等级选择 */
+/** 模型、思考等级与 Codex Fast 请求设置。 */
 import { enterSheet, leaveSheet, bindSheetKeys, chip } from './sheets.mjs';
 
 /** 创建模型与思考等级选择；状态由实例自己维护。 */
@@ -8,6 +8,8 @@ export function createModels({ addStatusRow }) {
 	const modelSearchEl = document.getElementById('modelSearch');
 	const thinkBarEl = document.getElementById('thinkBar');
 	const modelListEl = document.getElementById('modelList');
+	const fastBarEl = document.createElement('div');
+	fastBarEl.className = 'think-bar';
 
 	/** 模型浮层（/model）状态。 */
 	let modelOpen = false;
@@ -25,6 +27,11 @@ export function createModels({ addStatusRow }) {
 	let thinkLevels = [];
 
 	let thinkLevel = '';
+
+	/** 服务端开关只是请求设置；未收到响应前不宣称 Fast 已实际生效。 */
+	let fastState = { supported: false, enabled: false };
+	let fastUpdating = false;
+	let fastLocked = false;
 
 	/** 当前模型 / 全局默认模型的 provider/id（用于列表标记）。 */
 	let currentModelKey = '';
@@ -66,6 +73,35 @@ export function createModels({ addStatusRow }) {
 			chip.addEventListener('click', () => void applyThinkingLevel(level));
 			thinkBarEl.append(chip);
 		}
+	}
+
+	/** 复用等级条样式显示服务层请求选项；不用本地存储持久化开关。 */
+	function renderFastBar() {
+		fastBarEl.replaceChildren();
+		const label = document.createElement('span');
+		label.className = 'think-label';
+		label.textContent = '速度请求';
+		fastBarEl.append(label);
+		for (const enabled of [false, true]) {
+			const button = document.createElement('button');
+			button.type = 'button';
+			button.className = 'think-chip';
+			button.textContent = enabled ? 'Fast' : 'Standard';
+			const selected = enabled === fastState.enabled;
+			button.dataset.active = String(selected);
+			button.setAttribute('aria-pressed', String(selected));
+			button.disabled = !fastState.supported || fastLocked || fastUpdating;
+			button.title = !fastState.supported ? '当前模型或 SDK 不支持 Codex Fast 请求设置'
+				: fastLocked ? '请等待会话运行或压缩结束' : '只改当前会话，从下一次请求生效';
+			button.addEventListener('click', () => void applyFast(enabled));
+			fastBarEl.append(button);
+		}
+		const note = document.createElement('span');
+		note.className = 'think-label';
+		note.textContent = fastState.supported
+			? 'Fast 额外消耗额度；实际服务层未确认，费用仅估算'
+			: '仅 Codex 可设置，需 SDK 支持';
+		fastBarEl.append(note);
 	}
 
 	/** 渲染模型列表（按搜索词过滤、当前项高亮；置顶排序由服务端保证）。 */
@@ -131,6 +167,7 @@ export function createModels({ addStatusRow }) {
 		modelIndex = 0;
 		modelNotice = '正在读取模型列表…';
 		renderThinkBar();
+		renderFastBar();
 		renderModelPicker();
 		modelSearchEl.focus();
 		modelSearchEl.setSelectionRange(modelQuery.length, modelQuery.length);
@@ -151,10 +188,12 @@ export function createModels({ addStatusRow }) {
 		defaultModelKey = modelKey(data && data.default);
 		thinkLevels = Array.isArray(data && data.thinkingLevels) ? data.thinkingLevels : [];
 		thinkLevel = String((data && data.thinkingLevel) || thinkLevel || '');
+		fastState = { supported: Boolean(data?.fast?.supported), enabled: Boolean(data?.fast?.enabled) };
 		modelNotice = '';
 		const at = modelItems.findIndex((model) => modelKey(model) === currentModelKey);
 		modelIndex = at >= 0 ? at : 0;
 		renderThinkBar();
+		renderFastBar();
 		renderModelPicker();
 	}
 
@@ -231,11 +270,51 @@ export function createModels({ addStatusRow }) {
 		}
 	}
 
-	/** 同步模型与等级；会话帧不覆盖全局默认模型标记。 */
+	/** 请求后端切换服务层；失败时保留服务端回显的原设置。 */
+	async function applyFast(enabled) {
+		if (!fastState.supported || fastUpdating || fastLocked || enabled === fastState.enabled) return;
+		fastUpdating = true;
+		renderFastBar();
+		try {
+			const response = await fetch('/api/fast', {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ enabled }),
+			});
+			const data = await response.json().catch(() => ({}));
+			if (!response.ok) {
+				addStatusRow('切换速度请求失败：' + (data.error || 'HTTP ' + response.status), 'error');
+				return;
+			}
+			setContext(data.context);
+			addStatusRow(fastState.enabled
+				? '已设置 Fast 请求（额外消耗额度，实际服务层未确认）'
+				: '已设置 Standard 请求（不再主动注入 Fast）');
+		} catch (err) {
+			addStatusRow('切换速度请求失败：' + String(err?.message || err), 'error');
+		} finally {
+			fastUpdating = false;
+			renderFastBar();
+			if (modelOpen) modelSearchEl.focus();
+		}
+	}
+
+	/** 同步模型、等级和速度请求；会话帧不覆盖全局默认模型标记。 */
 	function setContext(context) {
 		currentModelKey = context.model || '';
 		thinkLevel = context.thinkingLevel || thinkLevel;
-		if (modelOpen) renderThinkBar();
+		fastState = { supported: Boolean(context.fast?.supported), enabled: Boolean(context.fast?.enabled) };
+		fastLocked = Boolean(context.busy || context.compacting);
+		if (modelOpen) {
+			renderThinkBar();
+			renderFastBar();
+		}
+	}
+
+	/** 回合事件不总带会话帧，独立同步锁状态，结束后及时恢复按钮。 */
+	function setRunState(locked) {
+		fastLocked = Boolean(locked);
+		if (modelOpen) renderFastBar();
 	}
 
 	/** 同步服务端等级变更，并刷新已打开的等级条。 */
@@ -250,6 +329,7 @@ export function createModels({ addStatusRow }) {
 
 	/** 初始化搜索、模型键位和浮层关闭操作。 */
 	function init() {
+		thinkBarEl.after(fastBarEl);
 		modelSearchEl.addEventListener('input', () => {
 			modelQuery = modelSearchEl.value; modelIndex = 0; renderModelPicker();
 		});
@@ -274,5 +354,5 @@ export function createModels({ addStatusRow }) {
 		}, moveThinking);
 	}
 
-	return { init, setContext, setThinkingLevel, isOpen, openModelPicker };
+	return { init, setContext, setRunState, setThinkingLevel, isOpen, openModelPicker };
 }

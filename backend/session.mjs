@@ -15,6 +15,60 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 当前会话：{ session, unsubscribe }。 */
 	let active = null;
 
+	/** Fast 仅属于当前会话，不写全局配置或会话文件。 */
+	let fastEnabled = false;
+
+	/** Codex 的最终请求接口；不把服务层字段发给其他 provider。 */
+	function isCodexModel(model) {
+		return model?.provider === 'openai-codex' && model?.api === 'openai-codex-responses';
+	}
+
+	/** 页面展示的是请求设置，不代表服务端已确认使用 Fast。 */
+	function fastInfo() {
+		const session = active?.session;
+		const supported = Boolean(active?.restoreFast && isCodexModel(session?.model));
+		return { supported, enabled: supported && fastEnabled };
+	}
+
+	/** 包装最终请求钩子；保留 SDK/扩展的变换，绕过 streamSimple 丢弃 serviceTier 的限制。 */
+	function attachFastRequests(session) {
+		const models = session.modelRuntime;
+		const original = models?.streamSimple;
+		if (typeof original !== 'function') return null;
+		models.streamSimple = (model, context, options) => {
+			// 每次调用固定设置，后续切换不改变已经开始的请求。
+			if (active?.session !== session || !fastEnabled || !isCodexModel(model)) {
+				return original.call(models, model, context, options);
+			}
+			return original.call(models, model, context, {
+				...options,
+				onPayload: async (payload, requestModel) => {
+					const replacement = await options?.onPayload?.(payload, requestModel);
+					const body = replacement === undefined ? payload : replacement;
+					if (isCodexModel(requestModel) && body && typeof body === 'object' && !Array.isArray(body)) {
+						return { ...body, service_tier: 'priority' };
+					}
+					return replacement;
+				},
+			});
+		};
+		/** 释放会话时还原原方法，不遗留对旧会话状态的引用。 */
+		return () => { models.streamSimple = original; };
+	}
+
+	/** 只在空闲 Codex 会话修改开关；关闭后不再主动注入服务层。 */
+	function setFast(enabled) {
+		const session = active?.session;
+		if (!session || !fastInfo().supported) {
+			throw Object.assign(new Error('当前模型或 pi SDK 不支持 Codex Fast 请求设置'), { status: 400 });
+		}
+		if (reloading || busy || isCompacting() || session.isStreaming || session.isIdle === false) {
+			throw Object.assign(new Error('会话正在运行、压缩或重载，请等待结束后再切换 Fast'), { status: 409 });
+		}
+		fastEnabled = enabled;
+		broadcastSession();
+	}
+
 	/** 是否正在跑回合（决定新消息走 prompt 还是 steer）。 */
 	let busy = false;
 
@@ -175,6 +229,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			contextWindow: model?.contextWindow ?? null,
 			thinkingLevel: session?.thinkingLevel ?? null,
 			thinkingLevels: availableThinkingLevels(session),
+			fast: fastInfo(),
 			busy,
 			compacting: isCompacting(),
 			// 用量快照（输入/输出/缓存/费用/上下文占用），页面输入区下方那一行
@@ -240,9 +295,11 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 				active.unsubscribe();
 			} catch {}
 			try {
+				active.restoreFast?.();
 				active.session.dispose();
 			} catch {}
 		}
+		fastEnabled = false;
 		const sessionManager = currentSessionManager();
 		const { session, modelFallbackMessage, extensionsResult } = await sdk.createAgentSession({
 			cwd,
@@ -282,7 +339,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 				}, 0);
 			}
 		});
-		active = { session, unsubscribe };
+		active = { session, unsubscribe, restoreFast: attachFastRequests(session) };
 		busy = false;
 		timings.resetRun();
 		pluginErrors = (extensionsResult?.errors ?? []).slice(0, 5).map((item) => ({
@@ -395,8 +452,9 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	/** 解除会话订阅并释放 SDK 会话；调用方必须先补发回显和落盘。 */
 	function dispose() {
 		try { active?.unsubscribe(); } catch {}
+		try { active?.restoreFast?.(); } catch {}
 		try { active?.session?.dispose(); } catch {}
 	}
 
-	return { getSession, isBusy, isReloading, isCompacting, compact, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
+	return { getSession, isBusy, isReloading, isCompacting, fastInfo, setFast, compact, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
 }

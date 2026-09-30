@@ -161,9 +161,12 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		uiOverlayEl.hidden = false;
 		// 记下来源焦点与栈；具体把焦点放哪个控件由下面按 method 决定
 		enterSheet(uiOverlayEl);
-		uiTitleEl.textContent = item.title || '插件请求';
-		uiMessageEl.hidden = !item.message;
-		uiMessageEl.textContent = item.message || '';
+		uiTitleEl.textContent =
+			{ input: '插件提问', select: '插件选择', confirm: '插件确认', editor: '插件编辑' }[item.method] || '插件请求';
+		// 完整提问可能连同编号说明放在 title 中，移到正文展示，不截断内容。
+		const message = [item.title, item.message].filter(Boolean).join('\n\n');
+		uiMessageEl.hidden = !message;
+		uiMessageEl.textContent = message;
 		uiListEl.hidden = !isList;
 		uiInputEl.hidden = item.method !== 'input';
 		uiEditorEl.hidden = item.method !== 'editor';
