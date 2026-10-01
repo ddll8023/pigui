@@ -1,5 +1,6 @@
 /** SDK 会话生命周期、上下文投影和用户回显；不持有传输连接。 */
 import { messageView, attachImageUrls, historyFrames, eventFrame } from './protocol.mjs';
+import mellosHost from './mellos-host.mjs';
 
 /** 提示条一行展示用的命令描述上限。 */
 const MAX_COMMAND_DESCRIPTION = 200;
@@ -301,9 +302,22 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		}
 		fastEnabled = false;
 		const sessionManager = currentSessionManager();
+		// 沿用默认资源发现与同一份设置，只增加 pigui 内部的地图展示边界。
+		const agentDir = sdk.getAgentDir();
+		const settingsManager = sdk.SettingsManager.create(cwd, agentDir);
+		const resourceLoader = new sdk.DefaultResourceLoader({
+			cwd,
+			agentDir,
+			settingsManager,
+			extensionFactories: [mellosHost],
+		});
+		await resourceLoader.reload();
 		const { session, modelFallbackMessage, extensionsResult } = await sdk.createAgentSession({
 			cwd,
+			agentDir,
 			sessionManager,
+			settingsManager,
+			resourceLoader,
 			// 插件的 session_start 分支据此区分“新会话 / 恢复会话”
 			sessionStartEvent: { type: 'session_start', reason: sessionPath || mode === 'continue' ? 'resume' : 'new' },
 		});
