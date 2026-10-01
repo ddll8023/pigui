@@ -1,7 +1,7 @@
 /** 编辑器、补全与附件发送 */
 
 /** 创建编辑器、补全与附件发送；状态由实例自己维护。 */
-export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
+export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
 	const inputEl = document.getElementById('input');
 	const sendEl = document.getElementById('send');
 	const cmdbarEl = document.getElementById('cmdbar');
@@ -21,6 +21,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		{ name: '/rewind', desc: '回退到某条提问之前', kind: 'action' },
 		{ name: '/reload', desc: '重载扩展 / 技能 / 提示模板与配置', kind: 'action' },
 		{ name: '/compact', desc: '手动压缩上下文，可附摘要要求', kind: 'action' },
+		{ name: '/settings', desc: '设置：主题 / 字号 / 状态栏', kind: 'action' },
 	];
 
 	/** 服务端列出的可补全命令（技能、提示模板、插件命令）；kind=insert 表示选中只写入输入框。 */
@@ -498,6 +499,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		else if (head === '/rewind') await openRewind();
 		else if (head === '/reload') await reloadResources();
 		else if (head === '/compact') await compactContext(rest);
+		else if (head === '/settings') await openSettings();
 		else await newSession();
 	}
 
@@ -529,7 +531,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			addStatusRow('会话正在压缩，请等待结束或先中止', 'error');
 			return;
 		}
-		// 页面内命令（/resume、/model、/new、/rewind、/reload、/compact）只在本页处理，不发给模型；
+		// 页面内命令（/resume、/model、/new、/rewind、/reload、/compact、/settings）只在本页处理，不发给模型；
 		// 技能 / 模板 / 插件命令不走这里，原样发送交给 pi 展开。
 		const { head, rest } = splitCommand(text);
 		if (COMMANDS.some((command) => command.name === head)) {
@@ -558,8 +560,9 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		const computed = getComputedStyle(inputEl);
 		const borders = parseFloat(computed.borderTopWidth) + parseFloat(computed.borderBottomWidth);
 		const wanted = inputEl.scrollHeight + borders;
-		// 上限跟着视口高度走：矮窗口下输入框不该把消息区顶没
-		const maxHeight = Math.min(200, window.innerHeight * 0.4);
+		// 上限跟着视口高度走：矮窗口下输入框不该把消息区顶没；
+		// 同时按字号等比放大，大字号下仍保持大约 8 行的可视行数。
+		const maxHeight = Math.min(200 * getFontScale(), window.innerHeight * 0.4);
 		inputEl.style.height = Math.min(wanted, maxHeight) + 'px';
 		// 只有到上限、内容确实放不下时才让 textarea 自己滚动
 		inputEl.style.overflowY = wanted > maxHeight ? 'auto' : 'hidden';

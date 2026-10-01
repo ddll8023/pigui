@@ -7,7 +7,7 @@ import { historyFrames, skillCommandText } from './protocol.mjs';
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
 /** 创建请求处理器；各模块只通过显式接口提供能力。 */
-export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemetry, workspace, externalUsage, close }) {
+export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemetry, workspace, externalUsage, maps, close }) {
 	const broadcast = transport.broadcast;
 
 	/** SSE 重连时即时读取当前分支，不缓存旧会话历史。 */
@@ -90,6 +90,11 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			if (route === 'GET /api/usage/external') {
 				const refresh = url.searchParams.get('refresh') === '1';
 				return send(res, 200, await externalUsage.getExternalUsage(refresh), { 'content-type': 'application/json' });
+			}
+
+			// 开发地图：限定到当前工作目录，只读页面列表与选中页，不运行地图工具。
+			if (route === 'GET /api/maps') {
+				return send(res, 200, await maps.snapshot(url.searchParams.get('page') ?? ''), { 'content-type': 'application/json' });
 			}
 
 			// @ 引用文件：只下发相对路径，不读文件内容

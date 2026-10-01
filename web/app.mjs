@@ -1,5 +1,5 @@
 /** 页面组装与 SSE 分发；业务状态由各功能模块独立维护。 */
-import { initTheme } from './theme.mjs';
+import { createSettings } from './settings.mjs';
 import { initSheets } from './sheets.mjs';
 import { createMessages } from './messages.mjs';
 import { createComposer } from './composer.mjs';
@@ -8,6 +8,7 @@ import { createModels } from './models.mjs';
 import { createNavigation } from './navigation.mjs';
 import { createPlugins } from './plugins.mjs';
 import { createUsage } from './usage.mjs';
+import { createMaps } from './maps.mjs';
 
 const metaEl = document.getElementById('meta');
 const projectPathEl = document.getElementById('projectPath');
@@ -43,10 +44,23 @@ const sessions = createSessions({
 const models = createModels({ addStatusRow: messages.addStatusRow });
 const plugins = createPlugins({ addStatusRow: messages.addStatusRow, setEditorText });
 const usage = createUsage();
+const maps = createMaps();
+// 设置浮层持有页面偏好；用量行的额度入口由它反向调用，避免两个模块互相导入。
+let settings;
+settings = createSettings({ openUsage: usage.openUsageOverlay });
+
+/** 设置变化后把状态栏开关重新下推给用量行与插件状态。 */
+function applyStatusBar(statusBar) {
+	usage.setStatusBarVisibility(statusBar);
+	plugins.setStatusBarVisibility(statusBar);
+}
+
+settings.subscribe(applyStatusBar);
+applyStatusBar(settings.getStatusBar());
 
 /** 文件补全让位给原有业务浮层；额度浮层不改变原优先级。 */
 function isOverlayOpen() {
-	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen();
+	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen() || settings.isOpen() || maps.isOpen();
 }
 
 /** 保持输入框键位的会话、回退、目录优先级。 */
@@ -64,6 +78,8 @@ composer = createComposer({
 	openModelPicker: models.openModelPicker,
 	openRewind: sessions.openRewind,
 	newSession: sessions.newSession,
+	openSettings: settings.openSettings,
+	getFontScale: settings.getFontScale,
 	isCompacting,
 	isSessionPickerOpen: sessions.isPickerOpen,
 	isOverlayOpen,
@@ -216,13 +232,14 @@ function connect() {
 }
 
 initSheets();
-initTheme();
+settings.init();
 sessions.init();
 models.init();
 plugins.init();
 navigation.init();
 composer.init();
 usage.init();
+maps.init();
 // 中止入口保留原有的请求失败降级行为。
 document.getElementById('abort').addEventListener('click', () => {
 	void fetch('/api/abort', { method: 'POST' }).catch(() => {});

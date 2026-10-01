@@ -20,6 +20,9 @@ export function createUsage() {
 	/** 外部额度（Codex 账号额度 / OpenCode Go 套餐）与浮层状态。 */
 	let externalUsage = null;
 
+	/** 状态栏用量行的分项开关；由设置浮层下推，默认全开。 */
+	let statusBar = { tokens: true, context: true, rate: true, badge: true };
+
 	let usageOpen = false;
 
 	let usageLoading = false;
@@ -280,52 +283,76 @@ export function createUsage() {
 	function renderUsage() {
 		usageEl.replaceChildren();
 		if (!usageState) {
-			// 本会话统计拿不到时，外部额度摘要仍然可以显示
-			const fallback = usageBadgeText();
-			usageEl.textContent = fallback ? `用量 — · ${fallback}` : '用量 —';
+			// 本会话统计拿不到时，外部额度摘要仍可以单独显示
+			const fallback = statusBar.badge ? usageBadgeText() : '';
+			const parts = [];
+			if (statusBar.tokens) parts.push('用量 —');
+			if (fallback) parts.push(fallback);
+			usageEl.textContent = parts.join(' · ');
+			usageEl.hidden = !parts.length;
 			return;
 		}
-		const head = document.createElement('span');
-		head.textContent = [
-			'↑' + formatTokens(usageState.input),
-			'↓' + formatTokens(usageState.output),
-			'R' + formatTokens(usageState.cacheRead),
-			'W' + formatTokens(usageState.cacheWrite),
-			'$' + (Number(usageState.cost) || 0).toFixed(3),
-		].join(' ');
-		usageEl.append(head);
+		if (statusBar.tokens) {
+			const head = document.createElement('span');
+			head.textContent = [
+				'↑' + formatTokens(usageState.input),
+				'↓' + formatTokens(usageState.output),
+				'R' + formatTokens(usageState.cacheRead),
+				'W' + formatTokens(usageState.cacheWrite),
+				'$' + (Number(usageState.cost) || 0).toFixed(3),
+			].join(' ');
+			usageEl.append(head);
+		}
 
-		const context = usageState.context || null;
-		const percent = context && Number.isFinite(context.percent) ? context.percent : null;
-		const windowSize =
-			context && Number.isFinite(context.contextWindow) ? formatTokens(context.contextWindow) : '?';
-		const contextNode = document.createElement('span');
-		contextNode.textContent =
-			'上下文 ' + (percent === null ? '?' : percent.toFixed(1) + '%') + '/' + windowSize;
-		// 占用过高时变色提醒（70% 警告、90% 危险）
-		if (percent !== null && percent >= 90) contextNode.className = 'danger';
-		else if (percent !== null && percent >= 70) contextNode.className = 'warn';
-		usageEl.append(contextNode);
+		if (statusBar.context) {
+			const context = usageState.context || null;
+			const percent = context && Number.isFinite(context.percent) ? context.percent : null;
+			const windowSize =
+				context && Number.isFinite(context.contextWindow) ? formatTokens(context.contextWindow) : '?';
+			const contextNode = document.createElement('span');
+			contextNode.textContent =
+				'上下文 ' + (percent === null ? '?' : percent.toFixed(1) + '%') + '/' + windowSize;
+			// 占用过高时变色提醒（70% 警告、90% 危险）
+			if (percent !== null && percent >= 90) contextNode.className = 'danger';
+			else if (percent !== null && percent >= 70) contextNode.className = 'warn';
+			usageEl.append(contextNode);
+		}
 
-		/** 仅为有效速率创建行内指标，未知值不占位。 */
-		const rate = (value, label) => {
-			if (!Number.isFinite(value)) return;
-			const node = document.createElement('span');
-			node.className = 'rate';
-			node.textContent = label + ' ' + value.toFixed(1) + ' t/s';
-			usageEl.append(node);
-		};
-		rate(rateState.live, '实');
-		rate(rateState.average, '均');
+		if (statusBar.rate) {
+			/** 仅为有效速率创建行内指标，未知值不占位。 */
+			const rate = (value, label) => {
+				if (!Number.isFinite(value)) return;
+				const node = document.createElement('span');
+				node.className = 'rate';
+				node.textContent = label + ' ' + value.toFixed(1) + ' t/s';
+				usageEl.append(node);
+			};
+			rate(rateState.live, '实');
+			rate(rateState.average, '均');
+		}
 
 		// 行内最短摘要：外部额度拿到了才显示（未登录/失败就不占位置）
-		const badge = usageBadgeText();
+		const badge = statusBar.badge ? usageBadgeText() : '';
 		if (badge) {
 			const node = document.createElement('span');
 			node.className = 'badge';
 			node.textContent = badge;
 			usageEl.append(node);
 		}
+		// 有数据但分项全关（或速率/摘要在当前时刻本就为空）时整行也隐藏
+		usageEl.hidden = !usageEl.childElementCount;
+	}
+
+	/** 应用设置里的状态栏开关；只控制用量行自己的分项，不影响额度缓存。 */
+	function setStatusBarVisibility(next) {
+		if (!next) return;
+		statusBar = {
+			tokens: next.tokens !== false,
+			context: next.context !== false,
+			rate: next.rate !== false,
+			badge: next.badge !== false,
+		};
+		renderUsage();
 	}
 
 	/** 换会话时清除速率，同一会话的刷新与切模型保留速率。 */
@@ -367,5 +394,5 @@ export function createUsage() {
 		setTimeout(() => void loadExternalUsage(false), 1000);
 	}
 
-	return { init, setContext, handleFrame };
+	return { init, setContext, handleFrame, setStatusBarVisibility, openUsageOverlay };
 }

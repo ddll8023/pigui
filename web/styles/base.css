@@ -4,7 +4,9 @@
    —— 工具调用按 ID 关联输出，连续调用归组，正文和思考仍保持原有顺序；
    —— 正红只用于运行、发送、错误与焦点，青色只用于思考与工具；
    —— 浅色 / 深色共用语义色令牌，默认跟随系统，手动选择保存在当前地址；
-      系统字体、无外部视觉资源，主题切换不改变布局与会话。 */
+      系统字体、无外部视觉资源，主题切换不改变布局与会话；
+   —— 主题与字号属于页面偏好，统一收在顶栏「设置」浮层里，只缩放字号不动布局；
+      切主题时颜色 / 描边 / 阴影统一 0.3s 渐变，首屏刷新不播动画。 */
 :root {
 	color-scheme: light;
 	--bg: #e8edf2;
@@ -90,6 +92,9 @@
 	--sheet-w-wide: clamp(320px, 94vw, 720px);
 	/* 浮层横向留白：头部、列表、字段、底部统一用这一个值 */
 	--sheet-pad-x: 14px;
+	/* 字号倍率：设置里的字号以 14px 为 1 倍，由页面首屏脚本与设置浮层写入；
+	   只参与各处的 font-size，不改间距、圆角与布局宽度。 */
+	--font-scale: 1;
 }
 :root[data-theme="dark"] {
 	color-scheme: dark;
@@ -157,7 +162,7 @@ body {
 	height: 100dvh;
 	background: var(--bg);
 	color: var(--text);
-	font: 14px/1.7 var(--sans);
+	font: 14px/1.7 var(--sans); font-size: calc(14px * var(--font-scale));
 	-webkit-font-smoothing: antialiased;
 }
 ::selection {
@@ -203,7 +208,7 @@ body {
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font: 750 22px/1 var(--sans);
+	font: 750 22px/1 var(--sans); font-size: calc(22px * var(--font-scale));
 	letter-spacing: -1px;
 }
 .brand-mark {
@@ -217,7 +222,7 @@ body {
 	color: var(--strong-text);
 	box-shadow: inset 0 1px 0 var(--strong-highlight);
 }
-.brand-name { color: var(--muted); font-size: 17px; font-weight: 500; letter-spacing: -0.6px; }
+.brand-name { color: var(--muted); font-size: calc(17px * var(--font-scale)); font-weight: 500; letter-spacing: -0.6px; }
 .project { flex: 1; min-width: 0; padding-left: 16px; border-left: 1px solid var(--line-strong); }
 .meta, .project-path {
 	display: block;
@@ -225,8 +230,8 @@ body {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.meta { font: 600 12px/1.5 var(--sans); }
-.project-path { color: var(--muted); font: 10px/1.5 var(--mono); }
+.meta { font: 600 12px/1.5 var(--sans); font-size: calc(12px * var(--font-scale)); }
+.project-path { color: var(--muted); font: 10px/1.5 var(--mono); font-size: calc(10px * var(--font-scale)); }
 .model-group {
 	display: flex;
 	align-items: center;
@@ -242,7 +247,7 @@ body {
 	flex: 1;
 	min-width: 0;
 	color: var(--text);
-	font: 11px/1.4 var(--mono);
+	font: 11px/1.4 var(--mono); font-size: calc(11px * var(--font-scale));
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -252,13 +257,13 @@ body {
 #new { color: var(--text); font-weight: 600; background: var(--think-bg); }
 #new:hover { background: var(--line); }
 #abort:hover { color: var(--accent); background: var(--accent-soft); }
-#themeToggle { min-width: 44px; color: var(--text); }
+#settingsToggle { min-width: 44px; color: var(--text); }
 .state {
 	flex: none;
 	display: inline-flex;
 	align-items: center;
 	gap: 6px;
-	font: 10.5px/1 var(--mono);
+	font: 10.5px/1 var(--mono); font-size: calc(10.5px * var(--font-scale));
 	letter-spacing: 0.08em;
 	text-transform: uppercase;
 	color: var(--faint);
@@ -295,9 +300,22 @@ body {
 	}
 }
 
+/* ---------- 主题切换的一次性过渡 ---------- */
+/* 切主题时给 <html> 挂 .theme-transition，颜色 / 描边 / 阴影一起 0.3s 渐变；
+   用一次性 class 而不是常驻 transition，hover 动效仍保持 160ms；
+   首屏不挂这个 class，刷新后不播动画；系统关掉动态效果时整块不生效。 */
+@media (prefers-reduced-motion: no-preference) {
+	:root.theme-transition,
+	:root.theme-transition *,
+	:root.theme-transition *::before,
+	:root.theme-transition *::after {
+		transition: background-color 300ms ease, color 300ms ease, border-color 300ms ease, box-shadow 300ms ease, outline-color 300ms ease, accent-color 300ms ease !important;
+	}
+}
+
 /* ---------- 按钮：轻量次级操作，发送键是唯一的强调色实心按钮 ---------- */
 button {
-	font: 12px/1 var(--sans);
+	font: 12px/1 var(--sans); font-size: calc(12px * var(--font-scale));
 	color: var(--muted);
 	background: transparent;
 	border: 1px solid transparent;

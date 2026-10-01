@@ -70,7 +70,7 @@ export function parseImages(body) {
 const ASSETS = new Map([
 	['GET /', [new URL('../index.html', import.meta.url), 'text/html; charset=utf-8']],
 	['GET /assets/app.mjs', [new URL('../web/app.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
-	['GET /assets/theme.mjs', [new URL('../web/theme.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
+	['GET /assets/settings.mjs', [new URL('../web/settings.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/sheets.mjs', [new URL('../web/sheets.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/markdown.mjs', [new URL('../web/markdown.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/messages.mjs', [new URL('../web/messages.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
@@ -80,11 +80,13 @@ const ASSETS = new Map([
 	['GET /assets/navigation.mjs', [new URL('../web/navigation.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/plugins.mjs', [new URL('../web/plugins.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/usage.mjs', [new URL('../web/usage.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
+	['GET /assets/maps.mjs', [new URL('../web/maps.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/styles/base.css', [new URL('../web/styles/base.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/messages.css', [new URL('../web/styles/messages.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/composer.css', [new URL('../web/styles/composer.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/overlays.css', [new URL('../web/styles/overlays.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/responsive.css', [new URL('../web/styles/responsive.css', import.meta.url), 'text/css; charset=utf-8']],
+	['GET /assets/styles/maps.css', [new URL('../web/styles/maps.css', import.meta.url), 'text/css; charset=utf-8']],
 ]);
 
 /** 命中资源白名单才读取文件，未命中交给 API 路由处理。 */

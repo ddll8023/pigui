@@ -696,9 +696,18 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (!pendingAssistant) {
 			pendingAssistant = createMessageRow('assistant', 'PI');
 			const waiting = document.createElement('div');
-			waiting.className = 'misc';
+			waiting.className = 'assistant-waiting';
 			waiting.setAttribute('role', 'status');
-			waiting.textContent = '等待模型响应…';
+			const label = document.createElement('span');
+			label.className = 'assistant-waiting-label';
+			label.textContent = '等待模型响应…';
+			waiting.append(label);
+			for (let index = 0; index < 3; index += 1) {
+				const dot = document.createElement('span');
+				dot.className = 'assistant-waiting-dot';
+				dot.setAttribute('aria-hidden', 'true');
+				waiting.append(dot);
+			}
 			pendingAssistant.body.append(waiting);
 			pendingAssistant.waiting = waiting;
 		}

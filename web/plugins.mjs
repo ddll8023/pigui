@@ -36,6 +36,9 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	/** 插件加载情况的提示签名，避免每次 session 帧重复刷屏。 */
 	let pluginNoticeKey = '';
 
+	/** 状态栏里的插件状态是否显示；由设置浮层下推，默认显示。 */
+	let showPluginStatus = true;
+
 	/** 页面原始标题（插件改过标题后用于还原）。 */
 	const defaultTitle = document.title;
 
@@ -97,7 +100,7 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		}
 	}
 
-	/** 重画插件状态槽（在输入区下方，多个键并排）；没内容就整块隐藏。 */
+	/** 重画插件状态槽（在输入区下方，多个键并排）；没内容或被设置关掉时整块隐藏。 */
 	function paintPluginStatus() {
 		pluginStatusEl.replaceChildren();
 		for (const [key, text] of pluginStatus) {
@@ -107,7 +110,15 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 			span.title = `${key}: ${text}`;
 			pluginStatusEl.append(span);
 		}
-		pluginStatusEl.hidden = pluginStatus.size === 0;
+		pluginStatusEl.hidden = pluginStatus.size === 0 || !showPluginStatus;
+	}
+
+	/** 应用设置里的状态栏开关；插件状态仍继续缓存，只是不画出来。 */
+	function setStatusBarVisibility(next) {
+		const nextShown = !next || next.plugin !== false;
+		if (nextShown === showPluginStatus) return;
+		showPluginStatus = nextShown;
+		paintPluginStatus();
 	}
 
 	/** 重画插件部件（setWidget 的字符串数组）；按 placement 放到输入区上方或下方。 */
@@ -329,5 +340,5 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		});
 	}
 
-	return { init, isOpen, handleUIFrame, noticePlugins };
+	return { init, isOpen, handleUIFrame, noticePlugins, setStatusBarVisibility };
 }
