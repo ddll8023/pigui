@@ -4,6 +4,7 @@ import { enterSheet, leaveSheet, bindSheetKeys, chip } from './sheets.mjs';
 /** 创建模型与思考等级选择；状态由实例自己维护。 */
 export function createModels({ addStatusRow }) {
 	const modelCloseEl = document.getElementById('modelClose');
+	const modelInfoEl = document.getElementById('modelInfo');
 	const modelOverlayEl = document.getElementById('modelOverlay');
 	const modelSearchEl = document.getElementById('modelSearch');
 	const thinkBarEl = document.getElementById('thinkBar');
@@ -329,6 +330,11 @@ export function createModels({ addStatusRow }) {
 
 	/** 初始化搜索、模型键位和浮层关闭操作。 */
 	function init() {
+		/** 顶栏模型区与 /model 共用同一浮层：再点一次即收起。 */
+		modelInfoEl.addEventListener('click', () => {
+			if (modelOpen) closeModelPicker();
+			else void openModelPicker('');
+		});
 		thinkBarEl.after(fastBarEl);
 		modelSearchEl.addEventListener('input', () => {
 			modelQuery = modelSearchEl.value; modelIndex = 0; renderModelPicker();

@@ -93,7 +93,8 @@ function renderRunState() {
 	models.setRunState(running || compacting);
 	// 新建会话的旧入口不检查 HTTP 错误，压缩期间禁用按钮，避免误清页面历史。
 	document.getElementById('new').disabled = compacting;
-	document.getElementById('send').disabled = compacting;
+	// 发送键在运行中兼作中止键，由编辑器自己维护外观与禁用态。
+	composer.setRunState(running, compacting);
 }
 
 /** 更新回合状态，不重绘消息。 */
@@ -114,7 +115,7 @@ function renderContext(context) {
 	metaEl.textContent = context.cwd ? context.cwd.split(/[\\/]/).filter(Boolean).pop() || context.cwd : '已连接';
 	projectPathEl.textContent = context.cwd || '';
 	modelInfoEl.textContent = [context.modelName || context.model, context.thinkingLevel, context.fast?.enabled ? 'Fast 请求' : ''].filter(Boolean).join(' · ') || '未选择模型';
-	modelInfoEl.title = [context.model, context.thinkingLevel ? '思考等级：' + context.thinkingLevel : '', context.fast?.enabled ? '已申请 Fast：额外消耗额度，实际服务层未确认，费用仅估算' : '', '输入 /model 切换'].filter(Boolean).join('\n');
+	modelInfoEl.title = [context.model, context.thinkingLevel ? '思考等级：' + context.thinkingLevel : '', context.fast?.enabled ? '已申请 Fast：额外消耗额度，实际服务层未确认，费用仅估算' : '', '点击或输入 /model 切换'].filter(Boolean).join('\n');
 	metaEl.title = [
 		context.cwd,
 		[context.model, context.modelName].filter(Boolean).join(' '),
@@ -237,10 +238,6 @@ plugins.init();
 navigation.init();
 composer.init();
 usage.init();
-// 中止入口保留原有的请求失败降级行为。
-document.getElementById('abort').addEventListener('click', () => {
-	void fetch('/api/abort', { method: 'POST' }).catch(() => {});
-});
 messages.showEmptyHint();
 // 先拉取上下文，随后由 SSE 持续同步。
 fetch('/api/context')

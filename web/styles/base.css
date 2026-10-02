@@ -3,7 +3,7 @@
       用户右置气泡、AI 开放式正文，保留紧凑的阅读密度；
    —— 工具调用按 ID 关联输出，连续调用归组，正文和思考仍保持原有顺序；
    —— 正红只用于运行、发送、错误与焦点，青色只用于思考与工具；
-   —— 浅色 / 深色共用语义色令牌，默认跟随系统，手动选择保存在当前地址；
+   —— 浅色 / 深色共用语义色令牌，默认浅色，手动选择保存在当前地址；
       系统字体、无外部视觉资源，主题切换不改变布局与会话；
    —— 主题与字号属于页面偏好，统一收在顶栏「设置」浮层里，只缩放字号不动布局；
       切主题时颜色 / 描边 / 阴影统一 0.3s 渐变，首屏刷新不播动画。 */
@@ -246,17 +246,24 @@ body {
 .model-info {
 	flex: 1;
 	min-width: 0;
+	width: 100%;
+	padding: 0;
+	border: 0;
+	background: none;
 	color: var(--text);
 	font: 11px/1.4 var(--mono); font-size: calc(11px * var(--font-scale));
+	text-align: left;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	cursor: pointer;
+	appearance: none;
 }
+.model-info:hover { color: var(--accent); }
 .topbar-actions { display: flex; gap: 3px; flex: none; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .topbar-actions button { border-radius: 7px; }
 #new { color: var(--text); font-weight: 600; background: var(--think-bg); }
 #new:hover { background: var(--line); }
-#abort:hover { color: var(--accent); background: var(--accent-soft); }
 #settingsToggle { min-width: 44px; color: var(--text); }
 .state {
 	flex: none;
@@ -333,14 +340,22 @@ button:focus-visible {
 	outline-offset: 1px;
 }
 #send {
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border-radius: 9px;
 	background: var(--accent);
 	color: var(--on-accent);
+	font-size: calc(15px * var(--font-scale));
 	font-weight: 600;
-	padding: 10px 18px;
-	border-radius: 9px;
+	line-height: 1;
 	box-shadow: var(--send-shadow);
 }
 #send:hover {
 	background: var(--accent-dark);
 	color: var(--on-accent);
 }
+/* 中止比发送深一档，图标从 ↑ 换成 ■ 后仍能一眼分辨 */
+#send[data-mode="abort"] { background: var(--accent-dark); }
+#send[data-mode="abort"]:hover { background: var(--accent); }
+#send:disabled { background: var(--line); color: var(--faint); box-shadow: none; cursor: default; }

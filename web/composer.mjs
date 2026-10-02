@@ -50,6 +50,11 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	/** 待发附件：图片存 base64 + 缩略图，文本写在正文里（附件只记名字便于删）。 */
 	let attachments = [];
 
+	/** 回合与压缩状态由 app.mjs 下推，输入区按钮据此在发送 / 中止之间切换。 */
+	let runBusy = false;
+
+	let runCompacting = false;
+
 	let attachSeq = 0;
 
 	/** 文本附件内联的上限：超过就截断并标注。 */
@@ -309,6 +314,32 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		return attachments.filter((item) => item.kind === 'image');
 	}
 
+	/** 输入框是否有待发内容（文本或附件）；有内容时按钮回到发送，让运行中也能继续 steer。 */
+	function hasDraft() {
+		return Boolean(inputEl.value.trim() || imageAttachments().length);
+	}
+
+	/** 同步发送键：压缩中置灰；回合运行且输入框为空时变成中止，其余情况为发送。 */
+	function renderSendState() {
+		const aborting = !runCompacting && runBusy && !hasDraft();
+		sendEl.disabled = runCompacting;
+		sendEl.dataset.mode = aborting ? 'abort' : 'send';
+		sendEl.textContent = aborting ? '■' : '↑';
+		sendEl.title = runCompacting ? '会话正在压缩，请等压缩结束'
+			: aborting ? '中止当前回合' : 'Enter 发送 · Shift+Enter 换行';
+		sendEl.setAttribute('aria-label', aborting ? '中止当前回合' : '发送');
+	}
+
+	/** 中止当前回合；失败时给出提示，不再像旧顶栏入口那样静默。 */
+	async function abortRun() {
+		try {
+			const response = await fetch('/api/abort', { method: 'POST' });
+			if (!response.ok) throw new Error('HTTP ' + response.status);
+		} catch (err) {
+			addStatusRow('中止失败：' + String((err && err.message) || err), 'error');
+		}
+	}
+
 	/** 是否按文本附件处理：text/* 一律算，其余看扩展名白名单。 */
 	function isTextAttachment(name, mimeType) {
 		if (mimeType.startsWith('text/')) return true;
@@ -425,6 +456,8 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			attachStripEl.append(chip);
 		}
 		syncJumpPosition();
+		// 附件条变化后按钮状态可能也要变（图片是"有内容"的一部分）
+		renderSendState();
 	}
 
 	/** 移除一个待发附件；文本附件同时从正文里删掉它内联的代码块。 */
@@ -488,7 +521,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	/** 执行页面内命令：只在本页处理，不会发给模型。 */
 	async function runActionCommand(head, rest) {
 		if (isCompacting()) {
-			addStatusRow('会话正在压缩，请等待结束或先中止', 'error');
+			addStatusRow('会话正在压缩，请等待压缩结束', 'error');
 			return;
 		}
 		hideCommands();
@@ -528,7 +561,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
 		if (!text && !images.length) return;
 		if (isCompacting()) {
-			addStatusRow('会话正在压缩，请等待结束或先中止', 'error');
+			addStatusRow('会话正在压缩，请等待压缩结束', 'error');
 			return;
 		}
 		// 页面内命令（/resume、/model、/new、/rewind、/reload、/compact、/settings）只在本页处理，不发给模型；
@@ -573,15 +606,20 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	function setText(text, { caret = false } = {}) {
 		inputEl.value = String(text || '');
 		autoGrow();
+		renderSendState();
 		inputEl.focus();
 		if (caret) inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 	}
 
 	/** 初始化输入、附件和补全监听，不接管浮层内部键位。 */
 	function init() {
-		sendEl.addEventListener('click', () => void send());
+		sendEl.addEventListener('click', () => {
+			if (sendEl.dataset.mode === 'abort') void abortRun();
+			else void send();
+		});
 		inputEl.addEventListener('input', () => {
 			autoGrow();
+			renderSendState();
 			refreshCommands();
 			refreshFiles();
 		});
@@ -656,7 +694,15 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		});
 		inputEl.addEventListener('blur', () => { hideCommands(); hideFiles(); });
 		autoGrow();
+		renderSendState();
 	}
 
-	return { init, setText, setCommands };
+	/** 回合与压缩状态下推：只影响发送键的外观与语义，不接管 busy 判断。 */
+	function setRunState(busy, compacting) {
+		runBusy = Boolean(busy);
+		runCompacting = Boolean(compacting);
+		renderSendState();
+	}
+
+	return { init, setText, setCommands, setRunState };
 }

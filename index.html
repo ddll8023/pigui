@@ -7,8 +7,8 @@
 		<script>
 			/** 在首屏绘制前应用主题与字号；本地存储不可用或偏好无效时用默认值。 */
 			(() => {
-				let preference = 'system';
-				let fontSize = 14;
+				let preference = 'light';
+				let fontSize = 16;
 				try {
 					const saved = localStorage.getItem('pigui.theme');
 					if (saved === 'light' || saved === 'dark') preference = saved;
@@ -42,7 +42,7 @@
 					<span class="project-path" id="projectPath"></span>
 				</div>
 				<div class="model-group">
-					<span class="model-info" id="modelInfo" title="输入 /model 切换模型">模型连接中…</span>
+					<button class="model-info" id="modelInfo" type="button" aria-haspopup="dialog" title="点击或输入 /model 切换模型">模型连接中…</button>
 					<span class="state" id="state" data-busy="false">
 						<span class="dot"></span>
 						<span class="label">空闲</span>
@@ -51,7 +51,6 @@
 				<div class="topbar-actions">
 					<button id="settingsToggle" type="button" title="设置（/settings）：主题 / 字号 / 状态栏" aria-label="设置">设置</button>
 					<button id="nav" title="消息目录（跳到某条消息）">目录</button>
-					<button id="abort" title="中止当前回合">中止</button>
 					<button id="new" title="开始一个新会话">新建会话</button>
 				</div>
 			</div>
@@ -77,7 +76,7 @@
 					</div>
 					<div class="composer-actions">
 						<button id="attach" type="button" title="添加附件（也可拖拽或粘贴图片）" aria-label="添加附件">＋</button>
-						<button id="send" title="Enter 发送 · Shift+Enter 换行">发送</button>
+						<button id="send" type="button" title="Enter 发送 · Shift+Enter 换行" aria-label="发送">↑</button>
 					</div>
 				</div>
 			</div>

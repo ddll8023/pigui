@@ -1,9 +1,13 @@
 /** 页面设置浮层：主题、字号与输入区状态栏的项目开关；偏好只存在本页。 */
 import { enterSheet, leaveSheet } from './sheets.mjs';
 
-/** 字号档位与基准值：档位即正文 px，基准 14px 对应 --font-scale: 1。 */
+/** 字号档位与基准值：档位即正文 px，基准 14px 对应 --font-scale: 1，默认档位 16px。 */
 const FONT_SIZES = [12, 13, 14, 15, 16, 17, 18];
 const BASE_FONT_SIZE = 14;
+
+/** 页面默认外观：没有存过本地偏好时用浅色 + 16px。 */
+const DEFAULT_THEME = 'light';
+const DEFAULT_FONT_SIZE = 16;
 
 /** 主题切换的一次性过渡时长，与 base.css 里 .theme-transition 的 300ms 对应。 */
 const THEME_TRANSITION_MS = 300;
@@ -37,9 +41,9 @@ export function createSettings({ openUsage } = {}) {
 	let open = false;
 
 	/** 当前偏好：主题、字号（px）与状态栏各开关。 */
-	let themePreference = 'system';
+	let themePreference = DEFAULT_THEME;
 
-	let fontSize = BASE_FONT_SIZE;
+	let fontSize = DEFAULT_FONT_SIZE;
 
 	let statusBar = {};
 
@@ -86,9 +90,9 @@ export function createSettings({ openUsage } = {}) {
 	/** 首屏脚本已把主题与字号写在根元素上，这里只做校验与回读。 */
 	function readState() {
 		const preference = themeRoot.dataset.themePreference;
-		themePreference = THEMES.some((item) => item.value === preference) ? preference : 'system';
+		themePreference = THEMES.some((item) => item.value === preference) ? preference : DEFAULT_THEME;
 		const size = Number(themeRoot.dataset.fontSize);
-		fontSize = FONT_SIZES.includes(size) ? size : BASE_FONT_SIZE;
+		fontSize = FONT_SIZES.includes(size) ? size : DEFAULT_FONT_SIZE;
 		statusBar = readStatusBar();
 	}
 
@@ -222,7 +226,7 @@ export function createSettings({ openUsage } = {}) {
 			FONT_SIZES.map((size) => ({
 				value: size,
 				label: size + 'px',
-				title: size === BASE_FONT_SIZE ? '默认字号（14px）' : size + 'px 正文，代码与浮层同比缩放',
+				title: size === DEFAULT_FONT_SIZE ? '默认字号（16px）' : size + 'px 正文，代码与浮层同比缩放',
 			})),
 			fontSize,
 			setFontSize,
