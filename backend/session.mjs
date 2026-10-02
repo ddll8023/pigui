@@ -1,5 +1,6 @@
 /** SDK 会话生命周期、上下文投影和用户回显；不持有传输连接。 */
 import { messageView, attachImageUrls, historyFrames, eventFrame } from './protocol.mjs';
+import { createResourceUsage } from './resource-usage.mjs';
 
 /** 提示条一行展示用的命令描述上限。 */
 const MAX_COMMAND_DESCRIPTION = 200;
@@ -11,6 +12,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	 * 老版本 SDK 没有 parseSkillBlock 时置空，技能消息退化成普通文本（与改动前一致）。
 	 */
 	const parseSkill = typeof sdk.parseSkillBlock === 'function' ? sdk.parseSkillBlock : undefined;
+	const resourceUsage = createResourceUsage({ cwd, parseSkill, broadcast });
 
 	/** 当前会话：{ session, unsubscribe }。 */
 	let active = null;
@@ -139,6 +141,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		// 条目 id 定下来之后才能给出图片取图地址（实时回显的图片也要能显示）
 		attachImageUrls(frame?.message);
 		broadcast(frame);
+		if (frame?.message?.entryId) resourceUsage.trackUser(message);
 	}
 
 	/** 当前会话支持的思考等级（老版本 SDK 没有该方法时返回空数组，不影响其它路由）。 */
@@ -240,6 +243,8 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			pluginUi: pluginUiBound,
 			// 页面 `/` 提示条的候选项：技能、提示模板、插件命令（都由 pi 自己展开或派发）
 			commands: slashCommands(session),
+			// 当前完整分支的实际使用汇总，不把加载列表当使用记录。
+			resourceUsage: resourceUsage.snapshot(),
 			// 插件加载失败列表（页面一次性提示，避免静默失效）
 			pluginErrors,
 			pid: process.pid,
@@ -290,6 +295,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		ui.flushTitle();
 		flushUserEcho();
 		timings.flushTimings();
+		resourceUsage.dispose();
 		if (active) {
 			try {
 				active.unsubscribe();
@@ -341,6 +347,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			if (type === 'agent_settled') telemetry.rateReset();
 			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
 			flushUserEcho();
+			if (active?.session === session) resourceUsage.track(event);
 			broadcast(eventFrame(event, extra, parseSkill));
 			if (type === 'compaction_start') broadcastSession();
 			if (type === 'compaction_end') {
@@ -352,6 +359,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			}
 		});
 		active = { session, unsubscribe, restoreFast: attachFastRequests(session) };
+		resourceUsage.bind(session);
 		busy = false;
 		timings.resetRun();
 		pluginErrors = (extensionsResult?.errors ?? []).slice(0, 5).map((item) => ({
@@ -433,9 +441,13 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			// 先释放旧插件的等待；shutdown 可能再次更新界面，在新插件启动前再清一次。
 			ui.reset();
 			flushUserEcho();
-			await session.reload({ beforeSessionStart: ui.reset });
+			await session.reload({ beforeSessionStart: () => {
+				ui.reset();
+				resourceUsage.refresh();
+			} });
 		} finally {
 			try {
+				resourceUsage.refresh();
 				pluginErrors = (session.resourceLoader?.getExtensions?.().errors ?? []).slice(0, 5).map((item) => ({
 					path: String(item?.path ?? ''),
 					error: String(item?.error ?? ''),
@@ -463,6 +475,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 
 	/** 解除会话订阅并释放 SDK 会话；调用方必须先补发回显和落盘。 */
 	function dispose() {
+		resourceUsage.dispose();
 		try { active?.unsubscribe(); } catch {}
 		try { active?.restoreFast?.(); } catch {}
 		try { active?.session?.dispose(); } catch {}

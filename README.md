@@ -101,6 +101,30 @@ pigui
 - 新装或改过技能后，执行 `/reload` 即可重新加载，无须重启 pigui；刷新页面不会重新加载服务端资源。老版本 SDK 没有 `session.reload()` 时会提示不支持，需要重启 pigui。
 - 老版本 pi SDK 没有 `resourceLoader` / `parseSkillBlock` 时不列技能、也不画徽标，技能消息按普通文本显示。
 
+## 会话使用汇总
+
+悬浮胶囊默认位于消息区右上角：`◇ 插件 3 · Skill 2 ▾`，不占页面布局空间，也不随消息滚动。点击展开约 280px 宽的不透明卡片，按「插件 / Skill」分类列出名称和使用方式；卡片限高、列表内部滚动，右上角 ✕、点击外部或 `Esc` 收起。沿用页面主题与字号，窄屏限制卡片宽度。
+
+拖拽与位置：
+
+- 鼠标左键按住胶囊或展开卡片的标题栏拖动；触屏可按住后拖动，超过 5px 才判定为拖拽。普通点击仍展开或收起，拖拽结束不触发误点击；关闭按钮和列表不启动拖拽，列表仍可滚动、选择和复制文本。
+- 拖动时显示抓手光标并禁止文本选中，胶囊及展开卡片限制在窗口边界内。卡片自动向上 / 下展开，左右偏移保证可见；拖动展开卡片时保持相对位置，避免标题栏在指针下突然跳开。
+- 手动位置不会被实时汇总、会话切换、附件区高度变化或窗口调整重置；窗口缩小时自动校正到可见范围。首次未拖动时仍跟随消息区右上角。
+- 一次拖拽释放后保存到 `localStorage` 的 `pigui.resourceUsagePosition`（`{version:1,x,y}`），同一访问地址刷新可恢复。存储被禁用或数据损坏时降级为本页有效 / 默认位置，不影响拖拽；不同端口或浏览器不共享位置，不写服务端。
+- 拖拽中按 `Esc`、发生指针取消、捕获丢失或窗口失焦时取消本次移动，恢复拖拽前位置且不保存。
+
+统计口径：
+
+- **插件**：SDK 实际派发插件命令、或产生插件工具的执行开始事件时计入，分别标「命令调用 / 工具调用」。工具失败仍算调用过，不代表执行成功；已加载、后台事件钩子、状态栏通知不算实际调用。
+- **Skill**：用户消息中 SDK 标准技能展开块标「显式调用」；`read` 工具的路径与当前已发现的技能文件完全一致，且执行结束明确成功时标「已读取」。读取失败、状态未知、普通同名文件、通过 Bash 或其他不透明脚本读取不计入；读取并不保证模型遵循了技能。
+- 同一来源按路径去重，使用方式合并；同名但路径不同的来源保留独立条目，悬停名称可查看来源路径。不把全部可用资源展示为「已使用」。
+- 汇总属于**当前完整会话分支**，包含已压缩的历史；新建会清空，切换与回退会按新分支恢复，`/reload` 更新来源目录但不清除已有记录。
+- 新识别的使用方式通过 `SessionManager.appendCustomEntry()` 保存为 `customType: "pigui.resource-usage"`，数据为 `{version:1, kind, name, location, mode}`，只含来源元数据，不保存参数、工具输出或技能正文，也不进入模型上下文、不增加模型调用。
+- 旧历史可从标准技能展开块和匹配当前技能文件路径的成功 `read` 调用恢复 Skill；没有来源记录的旧插件调用不猜测补齐。旧技能已移除、路径已变化或读取记录缺失时，无法补齐自动读取的记录。
+- 老 SDK 没有自定义条目写入能力时，新增使用元数据只保留在当前进程，并在卡片中说明。Pi 尚未创建会话文件的新会话里，仅执行插件命令不会强制创建文件：记录先留在内存，首条用户或助手消息落盘时再随会话保存。
+
+服务端代码改动需要重启 pigui 才生效；`/reload` 只重载 Pi 资源，不重载 pigui 服务端代码。
+
 ## @ 引用文件
 
 在输入框打一个 `@`（行首，或空白之后）就会弹出文件提示条，用法与 `/` 命令条一致：`↑`/`↓` 移动、`Enter` 或 `Tab` 选中、`Esc` 关闭，也可以直接用鼠标点；继续输入按子串过滤，提示条失焦或光标前的 `@` 片段结束时自动收起。
@@ -298,7 +322,7 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/` | 页面（`index.html`） |
-| GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表；上下文含 `commands`（提示条候选项：`{name, description, source}`，`source` 为 `skill` / `prompt` / `extension`） |
+| GET | `/api/context` | 当前上下文 + 该目录最近 30 个会话列表；上下文含 `commands`（提示条候选项：`{name, description, source}`，`source` 为 `skill` / `prompt` / `extension`）及 `resourceUsage`（当前分支的插件与 Skill 使用汇总） |
 | GET | `/api/models` | `{current, default, models, thinkingLevel, thinkingLevels}`；`models` 为本机已配鉴权的可用模型（裁剪后的 `provider/id/name/reasoning/contextWindow/input`，当前模型置顶） |
 | GET | `/api/messages` | 当前会话的消息（`{role, text, blocks, entryId, durationMs?, turnMs?, skill?}`） |
 | GET | `/api/sessions` | 该目录的会话列表 |
@@ -319,7 +343,7 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | POST | `/api/ui-response` | `{id, value \| confirmed \| cancelled}`；回答插件对话框（同 pi RPC 协议的三种形态）；id 已结束或不存在时 404 |
 | POST | `/api/shutdown` | 关闭服务 |
 
-SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/compacting/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`/命令表 `commands`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`/`reset`（重载时清理旧插件界面））、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`tool_execution_end` 的展示用 `diff`、`thinking_level_changed` 的 `level`，以及 `compaction_start` / `compaction_end` 的原因、取消 / 失败信息和压缩前后 token 数（不含摘要全文）；单帧过大时降级为 `frame_truncated`）、`error`。
+SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/compacting/正在跑的回合 `turn`/用量快照 `usage`/插件界面是否可用 `pluginUi`/插件加载失败 `pluginErrors`/命令表 `commands`/使用汇总 `resourceUsage`；切模型、切思考等级、换会话后都会广播）、`history`（历史消息；长会话会按 `part`/`parts` 分片，`part` 为 0 时页面清空重绘）、`delta`（助手文本增量）、`thinking`（思考增量）、`timer`（计时开始：`{scope: 'message'|'turn', phase: 'start', startedAt}`；回合结束时另外发 `{scope: 'turn', phase: 'end', durationMs, startedAt, entryId}`）、`usage`（用量快照 `{usage}`，形状同 `session` 帧里的 `usage`：`{input, output, cacheRead, cacheWrite, total, cost, context: {tokens, contextWindow, percent} | null}`；消息、工具结果与回合结束时广播，400ms 内合并为一帧）、`rate`（输出速率：`{phase: 'live', live, output}` 实时值、`{phase: 'idle', live: null}` 输出停止或回合收尾、`{phase: 'end', average, output, ms}` 一次模型调用结束时的平均值）、`message`（完成的消息，助手消息带本次实测耗时 `durationMs`）、`ui`（插件界面：`phase: 'ask'` 需要回答，带 `id`/`method`/`title`/`options?`/`placeholder?`/`prefill?`/`timeout?`；`phase: 'resolved'` 表示该对话框已结束；单向往返还有 `notice`/`status`/`widget`/`title`/`editor`/`reset`（重载时清理旧插件界面））、`event`（其它 pi 事件，带 `type` 与少量细节，含 `toolCallId`、`tool_execution_end` 的展示用 `diff`、`thinking_level_changed` 的 `level`，以及 `compaction_start` / `compaction_end` 的原因、取消 / 失败信息和压缩前后 token 数（不含摘要全文）；单帧过大时降级为 `frame_truncated`）、`resource_usage`（实时使用汇总：`{sessionId, usage: {plugins, skills, persistent}}`，每个来源为 `{name, location, modes}`；`persistent` 表示 SDK 是否支持自定义条目写入，插件方式为 `tool` / `command`，技能方式为 `explicit` / `read`；仅新增来源/方式及回合收尾时推送）、`error`。
 
 单个内容块文本超过 48 KB 会被截断并标记 `truncated: true`（避免几 MB 的工具输出把整帧撑爆）；工具结果的展示用 `diff` 同样按 48 KB 截断，并在末尾注明原文字节数。
 

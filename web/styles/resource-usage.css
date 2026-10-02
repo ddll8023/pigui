@@ -1,0 +1,72 @@
+/* 会话使用记录：可拖拽悬浮胶囊 + 四向定位的工具卡片，不为阅读区预留位置。 */
+.resource-usage {
+	position: fixed;
+	z-index: 9;
+	top: 80px;
+	right: 24px;
+	width: max-content;
+	max-width: calc(100vw - 24px);
+}
+.resource-usage[hidden], .resource-panel[hidden] { display: none; }
+.resource-toggle, .resource-head { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.resource-usage[data-dragging="true"], .resource-usage[data-dragging="true"] * { cursor: grabbing; user-select: none; -webkit-user-select: none; }
+.resource-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 30px;
+	max-width: 100%;
+	padding: 6px 11px;
+	border: 1px solid var(--line-strong);
+	border-radius: 999px;
+	background: var(--panel);
+	color: var(--muted);
+	box-shadow: var(--jump-shadow);
+	font: 11px/1.4 var(--sans);
+	font-size: calc(11px * var(--font-scale));
+	white-space: nowrap;
+}
+.resource-toggle:hover, .resource-toggle[aria-expanded="true"] { border-color: var(--tool); background: var(--panel); color: var(--text); }
+.resource-toggle strong { color: var(--tool); font: 600 11px/1.4 var(--mono); font-size: calc(11px * var(--font-scale)); font-variant-numeric: tabular-nums; }
+.resource-mark { color: var(--tool); }
+.resource-separator, .resource-chevron { color: var(--faint); }
+.resource-toggle[aria-expanded="true"] .resource-chevron { transform: rotate(180deg); }
+.resource-panel {
+	position: absolute;
+	top: calc(100% + 8px);
+	left: var(--resource-panel-left, 0px);
+	right: auto;
+	display: flex;
+	flex-direction: column;
+	width: 280px;
+	max-width: calc(100vw - 24px);
+	max-height: min(400px, var(--resource-panel-space, 60dvh));
+	overflow: hidden;
+	border: 1px solid var(--line-strong);
+	border-radius: 12px;
+	background: var(--panel);
+	color: var(--text);
+	box-shadow: var(--floating-shadow);
+}
+.resource-usage[data-side="up"] .resource-panel { top: auto; bottom: calc(100% + 8px); }
+.resource-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+.resource-head h2 { margin: 0; font: 600 12px/1.5 var(--sans); font-size: calc(12px * var(--font-scale)); }
+.resource-close { flex: none; width: 28px; height: 28px; padding: 0; }
+.resource-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px; }
+.resource-body:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
+.resource-group { padding: 12px 0; }
+.resource-group + .resource-group { border-top: 1px solid var(--line); }
+.resource-group h3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0 0 8px; color: var(--muted); font: 600 11px/1.5 var(--sans); font-size: calc(11px * var(--font-scale)); }
+.resource-group h3 span { color: var(--faint); font-family: var(--mono); font-weight: 400; }
+.resource-group ul { display: flex; flex-direction: column; gap: 9px; margin: 0; padding: 0; list-style: none; }
+.resource-group li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.resource-name { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; font: 11.5px/1.6 var(--mono); font-size: calc(11.5px * var(--font-scale)); }
+.resource-mode { margin-left: auto; color: var(--faint); font: 10px/1.5 var(--sans); font-size: calc(10px * var(--font-scale)); }
+.resource-empty { margin: 0; color: var(--faint); font-size: calc(11px * var(--font-scale)); }
+.resource-foot { flex: none; margin: 0; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--think-bg); color: var(--muted); font: 10px/1.6 var(--sans); font-size: calc(10px * var(--font-scale)); }
+@media (max-width: 430px) {
+	.resource-toggle { gap: 6px; padding: 5px 9px; font-size: calc(10px * var(--font-scale)); }
+}
+@media (prefers-reduced-motion: reduce) {
+	.resource-toggle { transition: none; }
+}

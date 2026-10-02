@@ -31,6 +31,7 @@
 		<link rel="stylesheet" href="/assets/styles/messages.css" />
 		<link rel="stylesheet" href="/assets/styles/composer.css" />
 		<link rel="stylesheet" href="/assets/styles/overlays.css" />
+		<link rel="stylesheet" href="/assets/styles/resource-usage.css" />
 		<link rel="stylesheet" href="/assets/styles/responsive.css" />
 	</head>
 	<body>
@@ -57,6 +58,24 @@
 		</header>
 
 		<main id="messages" aria-label="会话消息"></main>
+
+		<aside class="resource-usage" id="resourceUsage" aria-label="会话使用汇总" hidden>
+			<button class="resource-toggle" id="resourceUsageToggle" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="resourceUsagePanel" title="查看本会话使用过的插件与 Skill">
+				<span class="resource-mark" aria-hidden="true">◇</span>
+				<span>插件 <strong id="resourcePluginCount">0</strong></span>
+				<span class="resource-separator" aria-hidden="true">·</span>
+				<span>Skill <strong id="resourceSkillCount">0</strong></span>
+				<span class="resource-chevron" aria-hidden="true">▾</span>
+			</button>
+			<section class="resource-panel" id="resourceUsagePanel" role="dialog" aria-labelledby="resourceUsageTitle" aria-describedby="resourceUsageFoot" hidden>
+				<div class="resource-head">
+					<h2 id="resourceUsageTitle">本会话已使用</h2>
+					<button class="resource-close" id="resourceUsageClose" type="button" title="关闭（Esc）" aria-label="关闭使用汇总">✕</button>
+				</div>
+				<div class="resource-body" id="resourceUsageBody" tabindex="0" aria-label="插件与 Skill 列表"></div>
+				<p class="resource-foot" id="resourceUsageFoot"></p>
+			</section>
+		</aside>
 
 		<footer id="composer">
 			<div class="plugin-widget" id="widgetAbove" hidden></div>

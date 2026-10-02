@@ -80,10 +80,12 @@ const ASSETS = new Map([
 	['GET /assets/navigation.mjs', [new URL('../web/navigation.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/plugins.mjs', [new URL('../web/plugins.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/usage.mjs', [new URL('../web/usage.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
+	['GET /assets/resource-usage.mjs', [new URL('../web/resource-usage.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/styles/base.css', [new URL('../web/styles/base.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/messages.css', [new URL('../web/styles/messages.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/composer.css', [new URL('../web/styles/composer.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/overlays.css', [new URL('../web/styles/overlays.css', import.meta.url), 'text/css; charset=utf-8']],
+	['GET /assets/styles/resource-usage.css', [new URL('../web/styles/resource-usage.css', import.meta.url), 'text/css; charset=utf-8']],
 	['GET /assets/styles/responsive.css', [new URL('../web/styles/responsive.css', import.meta.url), 'text/css; charset=utf-8']],
 ]);
 

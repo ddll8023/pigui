@@ -8,6 +8,7 @@ import { createModels } from './models.mjs';
 import { createNavigation } from './navigation.mjs';
 import { createPlugins } from './plugins.mjs';
 import { createUsage } from './usage.mjs';
+import { createResourceUsage } from './resource-usage.mjs';
 
 const metaEl = document.getElementById('meta');
 const projectPathEl = document.getElementById('projectPath');
@@ -43,6 +44,7 @@ const sessions = createSessions({
 const models = createModels({ addStatusRow: messages.addStatusRow });
 const plugins = createPlugins({ addStatusRow: messages.addStatusRow, setEditorText });
 const usage = createUsage();
+const resourceUsage = createResourceUsage();
 // 设置浮层持有页面偏好；用量行的额度入口由它反向调用，避免两个模块互相导入。
 let settings;
 settings = createSettings({ openUsage: usage.openUsageOverlay });
@@ -58,7 +60,7 @@ applyStatusBar(settings.getStatusBar());
 
 /** 文件补全让位给原有业务浮层；额度浮层不改变原优先级。 */
 function isOverlayOpen() {
-	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen() || settings.isOpen();
+	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen() || settings.isOpen() || resourceUsage.isOpen();
 }
 
 /** 保持输入框键位的会话、回退、目录优先级。 */
@@ -126,6 +128,7 @@ function renderContext(context) {
 	messages.setContext(context);
 	usage.setContext(context);
 	models.setContext(context);
+	resourceUsage.setContext(context);
 	// 技能 / 提示模板 / 插件命令由服务端会话帧给出，页面只把它们并进 `/` 提示条
 	composer.setCommands(context.commands);
 	setCompacting(context.compacting);
@@ -138,7 +141,7 @@ function renderContext(context) {
 function handleFrame(frame) {
 	const pinned = messages.pinnedToBottom();
 	try {
-		if (messages.handleFrame(frame) || usage.handleFrame(frame)) return;
+		if (resourceUsage.handleFrame(frame) || messages.handleFrame(frame) || usage.handleFrame(frame)) return;
 		if (frame.kind === 'session') {
 			renderContext(frame.info);
 			if (frame.info && frame.info.modelFallbackMessage) messages.addStatusRow('提示：' + frame.info.modelFallbackMessage);
@@ -238,6 +241,7 @@ plugins.init();
 navigation.init();
 composer.init();
 usage.init();
+resourceUsage.init();
 messages.showEmptyHint();
 // 先拉取上下文，随后由 SSE 持续同步。
 fetch('/api/context')
