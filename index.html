@@ -32,7 +32,6 @@
 		<link rel="stylesheet" href="/assets/styles/composer.css" />
 		<link rel="stylesheet" href="/assets/styles/overlays.css" />
 		<link rel="stylesheet" href="/assets/styles/responsive.css" />
-		<link rel="stylesheet" href="/assets/styles/maps.css" />
 	</head>
 	<body>
 		<header class="topbar">
@@ -50,7 +49,6 @@
 					</span>
 				</div>
 				<div class="topbar-actions">
-					<button id="mapToggle" type="button" title="当前工作目录的开发地图" aria-haspopup="dialog" aria-controls="mapOverlay" aria-expanded="false">地图</button>
 					<button id="settingsToggle" type="button" title="设置（/settings）：主题 / 字号 / 状态栏" aria-label="设置">设置</button>
 					<button id="nav" title="消息目录（跳到某条消息）">目录</button>
 					<button id="abort" title="中止当前回合">中止</button>
@@ -199,49 +197,6 @@
 				</div>
 				<div class="settings-body" id="settingsBody"></div>
 				<div class="picker-foot">设置只保存在本页（localStorage），不影响会话与服务端</div>
-			</div>
-		</div>
-
-		<div class="overlay map-overlay" id="mapOverlay" hidden>
-			<div class="picker map-picker" role="dialog" aria-modal="true" aria-labelledby="mapTitle" tabindex="-1">
-				<div class="picker-head map-head">
-					<div class="map-heading">
-						<span class="picker-title" id="mapTitle">开发地图</span>
-						<span class="map-project" id="mapProject"></span>
-					</div>
-					<div class="picker-head-right">
-						<span class="picker-key">独立地图 · Esc 关闭</span>
-						<button class="picker-close" id="mapClose" type="button" title="关闭地图（Esc）" aria-label="关闭地图">✕</button>
-					</div>
-				</div>
-				<div class="map-toolbar">
-					<div class="map-page-group">
-						<button class="sheet-btn" id="mapBack" type="button" title="返回父图" hidden>返回</button>
-						<label class="map-sr-only" for="mapPages">地图页面</label>
-						<select id="mapPages" disabled></select>
-					</div>
-					<label class="map-sr-only" for="mapSearch">搜索地图节点</label>
-					<input class="map-search" id="mapSearch" type="search" placeholder="搜索节点、设计说明或证据…" autocomplete="off" />
-					<div class="map-controls">
-						<button class="sheet-btn map-zoom-button" id="mapZoomOut" type="button" title="缩小" aria-label="缩小地图">−</button>
-						<span class="map-zoom" id="mapZoom" aria-label="地图缩放比例">—</span>
-						<button class="sheet-btn map-zoom-button" id="mapZoomIn" type="button" title="放大" aria-label="放大地图">＋</button>
-						<button class="sheet-btn" id="mapFit" type="button" title="适配整张地图">适配</button>
-						<button class="sheet-btn" id="mapRefresh" type="button" title="立即重新读取地图">刷新</button>
-					</div>
-				</div>
-				<div class="map-status" id="mapStatus" role="status" aria-live="polite"></div>
-				<div class="map-results" id="mapResults" aria-label="节点搜索结果" hidden></div>
-				<div class="map-viewport" id="mapViewport" role="region" aria-label="地图画布；方向键平移，加减键缩放，0 适配整图" tabindex="0">
-					<div class="map-world" id="mapWorld" hidden></div>
-					<div class="map-empty" id="mapEmpty"></div>
-				</div>
-				<section class="map-details" id="mapDetails" aria-label="节点详情"></section>
-				<div class="map-foot">
-					<div class="map-legend" id="mapLegend"></div>
-					<span class="map-summary" id="mapSummary"></span>
-					<span>证据来自地图记录；pigui 不自动执行验证或修改地图。</span>
-				</div>
 			</div>
 		</div>
 

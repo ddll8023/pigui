@@ -8,7 +8,6 @@ import { createModels } from './models.mjs';
 import { createNavigation } from './navigation.mjs';
 import { createPlugins } from './plugins.mjs';
 import { createUsage } from './usage.mjs';
-import { createMaps } from './maps.mjs';
 
 const metaEl = document.getElementById('meta');
 const projectPathEl = document.getElementById('projectPath');
@@ -44,7 +43,6 @@ const sessions = createSessions({
 const models = createModels({ addStatusRow: messages.addStatusRow });
 const plugins = createPlugins({ addStatusRow: messages.addStatusRow, setEditorText });
 const usage = createUsage();
-const maps = createMaps();
 // 设置浮层持有页面偏好；用量行的额度入口由它反向调用，避免两个模块互相导入。
 let settings;
 settings = createSettings({ openUsage: usage.openUsageOverlay });
@@ -60,7 +58,7 @@ applyStatusBar(settings.getStatusBar());
 
 /** 文件补全让位给原有业务浮层；额度浮层不改变原优先级。 */
 function isOverlayOpen() {
-	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen() || settings.isOpen() || maps.isOpen();
+	return sessions.isOpen() || navigation.isOpen() || models.isOpen() || plugins.isOpen() || settings.isOpen();
 }
 
 /** 保持输入框键位的会话、回退、目录优先级。 */
@@ -239,7 +237,6 @@ plugins.init();
 navigation.init();
 composer.init();
 usage.init();
-maps.init();
 // 中止入口保留原有的请求失败降级行为。
 document.getElementById('abort').addEventListener('click', () => {
 	void fetch('/api/abort', { method: 'POST' }).catch(() => {});

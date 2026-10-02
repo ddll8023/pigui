@@ -11,7 +11,6 @@ import { createTelemetry } from './backend/telemetry.mjs';
 import { createPluginUI } from './backend/plugin-ui.mjs';
 import { createWorkspace } from './backend/workspace.mjs';
 import { createExternalUsage } from './backend/external-usage.mjs';
-import { createMaps } from './backend/maps.mjs';
 
 /**
  * 启动本地服务；保持原有返回接口和默认新建会话行为。
@@ -41,13 +40,12 @@ export async function startServer({ sdk, cwd, mode = 'new', sessionPath = '', po
 	const ui = createPluginUI({ broadcast: transport.broadcast, getClientCount: transport.getClientCount });
 	const workspace = createWorkspace({ cwd });
 	const externalUsage = createExternalUsage({ sdk, getSession });
-	const maps = createMaps({ cwd });
 	runtime = createSessionRuntime({
 		sdk, cwd, mode, sessionPath, pluginUi,
 		broadcast: transport.broadcast, timings, telemetry, ui,
 	});
 	const handler = createRequestHandler({
-		sdk, cwd, runtime, transport, ui, telemetry, workspace, externalUsage, maps, close,
+		sdk, cwd, runtime, transport, ui, telemetry, workspace, externalUsage, close,
 	});
 	const server = http.createServer(handler);
 
