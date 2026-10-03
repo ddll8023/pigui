@@ -6,6 +6,31 @@ import { historyFrames, skillCommandText } from './protocol.mjs';
 /** 允许的请求等级，实际能力仍由 SDK 收敛。 */
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
+/** 中止请求等待回合收尾的上限；超时先返回响应，中止本身继续在后台进行。 */
+const ABORT_SETTLE_TIMEOUT_MS = 5000;
+
+/**
+ * 等一次中止真正收尾，但最多等 ABORT_SETTLE_TIMEOUT_MS。
+ * 超时后不让 abort 的后续失败变成未处理拒绝，也不影响已经返回的响应。
+ *
+ * @param {Promise<void>} aborting `session.abort()` 返回的 Promise。
+ */
+async function waitForAbort(aborting) {
+	let timer;
+	try {
+		await Promise.race([
+			aborting,
+			new Promise((resolve) => {
+				timer = setTimeout(resolve, ABORT_SETTLE_TIMEOUT_MS);
+			}),
+		]);
+	} finally {
+		clearTimeout(timer);
+		// 超时先返回时 aborting 可能还会失败，这里挂一个空 catch 避免未处理拒绝
+		aborting.catch(() => {});
+	}
+}
+
 /** 创建请求处理器；各模块只通过显式接口提供能力。 */
 export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemetry, workspace, externalUsage, close }) {
 	const broadcast = transport.broadcast;
@@ -227,9 +252,14 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 			}
 
 			if (route === 'POST /api/abort') {
-				if (runtime.getSession()) await runtime.getSession().abort();
-				// 中止后有的插件还挂在对话框上（没传 AbortSignal 的那种），不放开它们这个回合就结束不了
+				const session = runtime.getSession();
+				// session.abort() 会等回合真正收尾（SDK 的 abort() 内部 await waitForIdle），
+				// 而回合可能卡在没传 AbortSignal 的插件对话框上，所以顺序必须是：
+				// 先调用 abort()（它在第一个 await 前已打完中止标记并调了 agent.abort()），
+				// 再放开对话框，否则两边互等，请求会一直挂到 10 分钟上限。
+				const aborting = session ? session.abort() : null;
 				ui.settleAllUI();
+				if (aborting) await waitForAbort(aborting);
 				// 中止不一定走到 agent_settled：实时速率在这里直接收尾
 				telemetry.rateReset();
 				return send(res, 202, { aborted: true }, { 'content-type': 'application/json' });

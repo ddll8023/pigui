@@ -265,7 +265,7 @@ pigui
 
 - 对话框发起时页面还没接上（例如启动阶段，`boot` 发生在 `listen` 之前），先等 30 秒；启动完成后才打开页面也能回答，超时则按默认值（`confirm` → `false`，其余 → `undefined`）；
 - 页面全部断开后同样宽限 30 秒，仍未接上就按默认值收尾；期间刷新页面，未决对话框随连接重建**重新弹出**；
-- 点输入区的 `■ 中止`、或切换 / 新建会话时，手上所有未决对话框立即按默认值交回插件（否则没传 `AbortSignal` 的插件会把回合永远挂在 `await` 上）；
+- 点输入区的 `■ 中止`、或切换 / 新建会话时，手上所有未决对话框立即按默认值交回插件（否则没传 `AbortSignal` 的插件会把回合永远挂在 `await` 上）；中止的顺序是**先发起 `session.abort()`、再放开对话框**：SDK 的 `abort()` 内部会 `await waitForIdle()`，而回合正卡在没传 `AbortSignal` 的对话框上时，顺序反了就会互相等（旧版本表现为中止请求一直不返回、页面停在「运行中」，最长拖到 10 分钟上限）；
 - 插件带 `timeout` 时按它超时（不超过 10 分钟总上限），对话框底部显示一条**进度条 + 剩余秒数**（条按剩余时间收缩）；插件带 `AbortSignal`（例如 `permission-mode` 传的 `ctx.signal`）时，回合被中止会立即按默认值收尾；插件不 `await` 就把对话框丢下时，10 分钟总上限也会把它收尾；
 - 多个页面（多页签）都能看到同一个对话框，**先回答的生效**，其余页签收到结束通知后自动关闭。
 
@@ -332,7 +332,7 @@ pi 的 SDK **不写进 package.json**，而是借用本机已装的 pi，依次�
 | GET | `/api/events` | SSE 事件流，连接时先补 `session` 与 `history` 两帧；新建 / 切换会话后也会广播 `session` + `history` |
 | POST | `/api/prompt` | `{message, images?}`；`images` 为 `[{data(base64), mimeType}]`（≤ 8 张、单张 ≤ 10MB、仅 png/jpeg/webp/gif），文本与图片不能同时为空；运行中会自动改为 steer |
 | POST | `/api/steer` | `{message, images?}`；强制 steer，`images` 同上 |
-| POST | `/api/abort` | 中止当前回合 |
+| POST | `/api/abort` | 中止当前回合；先发起中止、再按默认值交回未决的插件对话框，然后等回合收尾（最多 5 秒，超时也先返回 `202`，中止继续在后台进行） |
 | POST | `/api/model` | `{provider, id, persist?}`；切换模型（默认只改本会话，`persist: true` 同时写全局默认）；不在可用列表内 404，未配鉴权 400 |
 | POST | `/api/thinking` | `{level}`；切换本会话思考等级（只接受 `off/minimal/low/medium/high/xhigh/max`，按模型能力收敛） |
 | POST | `/api/compact` | `{instructions?}`；手动压缩空闲会话，成功返回 `{result: {tokensBefore, estimatedTokensAfter}, context}`；取消返回 `{cancelled: true, context}`。运行、压缩或重载期间 409，SDK 不支持或没有可压缩内容时 400，模型请求失败时 500；摘要要求必须是文本 |
