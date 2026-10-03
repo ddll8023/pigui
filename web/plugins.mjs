@@ -13,6 +13,9 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	const uiInputEl = document.getElementById('uiInput');
 	const uiEditorEl = document.getElementById('uiEditor');
 	const uiFootEl = document.getElementById('uiFoot');
+	const uiMinEl = document.getElementById('uiMin');
+	const uiPendingEl = document.getElementById('uiPending');
+	const uiPendingTextEl = document.getElementById('uiPendingText');
 	const pluginStatusEl = document.getElementById('pluginStatus');
 	const widgetAboveEl = document.getElementById('widgetAbove');
 	const widgetBelowEl = document.getElementById('widgetBelow');
@@ -27,6 +30,12 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	let uiTimeoutTimer = 0;
 
 	let uiDeadline = 0;
+
+	/** 插件给的超时总长（毫秒）；0 表示没有超时，收起入口不显示倒计时。 */
+	let uiTimeoutTotal = 0;
+
+	/** 对话框是否被用户收起：只隐藏浮层，选项高亮与已输入文本留在 DOM 里。 */
+	let uiCollapsed = false;
 
 	/** 插件状态槽与部件：按 key 覆盖，空值删除（由插件自己维护生命周期）。 */
 	const pluginStatus = new Map();
@@ -146,12 +155,61 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	function hideUI() {
 		uiActive = null;
 		uiIndex = 0;
+		uiCollapsed = false;
+		uiTimeoutTotal = 0;
 		if (uiTimeoutTimer) {
 			clearInterval(uiTimeoutTimer);
 			uiTimeoutTimer = 0;
 		}
 		uiOverlayEl.hidden = true;
 		leaveSheet(uiOverlayEl);
+		// 从收起入口展开过的对话框，焦点会还给那个入口；入口紧接着就要隐藏，先改回输入框
+		if (document.activeElement === uiPendingEl) inputEl.focus();
+		uiPendingEl.hidden = true;
+	}
+
+	/** 收起入口的文案：待回答条数，以及插件给了超时时的剩余秒数。 */
+	function paintPending() {
+		if (!uiActive || !uiCollapsed) {
+			uiPendingEl.hidden = true;
+			return;
+		}
+		const parts = [`插件提问 · 还有 ${uiQueue.length} 个待回答`];
+		if (uiTimeoutTotal > 0) parts.push(`还有 ${Math.max(0, Math.ceil((uiDeadline - Date.now()) / 1000))}s`);
+		uiPendingTextEl.textContent = parts.join(' · ');
+		uiPendingEl.hidden = false;
+	}
+
+	/** 收起对话框：隐藏浮层并把焦点还回打开它的地方；不重新渲染，草稿与高亮都留在 DOM 里。 */
+	function collapseUI() {
+		if (!uiActive) return;
+		uiCollapsed = true;
+		uiOverlayEl.hidden = true;
+		leaveSheet(uiOverlayEl);
+		paintPending();
+	}
+
+	/** 展开被收起的对话框：不重排超时计时，也不重置已经输入的内容。 */
+	function expandUI() {
+		if (!uiActive || !uiCollapsed) return;
+		uiCollapsed = false;
+		uiPendingEl.hidden = true;
+		uiOverlayEl.hidden = false;
+		enterSheet(uiOverlayEl);
+		focusUIControl();
+	}
+
+	/** 把焦点放到当前对话框真正可操作的控件上；没有可选条目时落在浮层容器上。 */
+	function focusUIControl() {
+		const item = uiActive;
+		if (!item) return;
+		if (item.method === 'select' || item.method === 'confirm') {
+			if (uiListEl.children.length) uiListEl.focus();
+			else uiOverlayEl.querySelector('.picker')?.focus();
+			return;
+		}
+		if (item.method === 'input') uiInputEl.focus();
+		else uiEditorEl.focus();
 	}
 
 	/** 弹出队首对话框；队列空了就把焦点还给输入框。 */
@@ -169,6 +227,9 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 	function renderUI() {
 		const item = uiActive;
 		const isList = item.method === 'select' || item.method === 'confirm';
+		// 队列里的下一题不继承收起状态，照常正面弹出
+		uiCollapsed = false;
+		uiPendingEl.hidden = true;
 		uiOverlayEl.hidden = false;
 		// 记下来源焦点与栈；具体把焦点放哪个控件由下面按 method 决定
 		enterSheet(uiOverlayEl);
@@ -208,15 +269,13 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 			});
 			// 没有选项可选的 select 直接把选择框收起来，只能 Esc 取消
 			uiListEl.hidden = options.length === 0;
-			if (options.length) uiListEl.focus();
 		} else if (item.method === 'input') {
 			uiInputEl.value = '';
 			uiInputEl.placeholder = item.placeholder || '';
-			uiInputEl.focus();
 		} else {
 			uiEditorEl.value = item.prefill || '';
-			uiEditorEl.focus();
 		}
+		focusUIControl();
 		uiKeyEl.textContent =
 			item.method === 'select'
 				? '↑↓ 选择 · Enter 确认 · Esc 取消'
@@ -273,6 +332,7 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		if (!Number.isFinite(item.timeout) || item.timeout <= 0) return;
 		const total = item.timeout;
 		uiDeadline = Date.now() + total;
+		uiTimeoutTotal = total;
 		// foot 换成“进度条 + 文字”，倒计时长短一眼可见
 		uiFootEl.replaceChildren();
 		const wrap = document.createElement('div');
@@ -291,6 +351,8 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 			const left = Math.ceil(leftMs / 1000);
 			fill.style.width = Math.max(0, Math.min(100, (leftMs / total) * 100)) + '%';
 			text.textContent = `还有 ${left}s 将按默认值处理（${item.method === 'confirm' ? '取消' : '不选择'}）`;
+			// 收起期间入口上的倒计时跟着走，浮层里那条进度条只是被藏起来了
+			paintPending();
 			if (left <= 0) {
 				clearInterval(uiTimeoutTimer);
 				uiTimeoutTimer = 0;
@@ -309,11 +371,13 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		for (const item of context.pluginErrors || []) addStatusRow(`插件加载失败：${item.path || '(未知)'} — ${item.error || ''}`, 'error');
 	}
 
-	/** 插件对话框打开时文件补全应让位。 */
-	function isOpen() { return Boolean(uiActive); }
+	/** 正面打开的插件对话框占住键盘；收起后把输入框与文件补全还给页面。 */
+	function isOpen() { return Boolean(uiActive) && !uiCollapsed; }
 
 	/** 初始化回答键位；遮罩点击不取消插件请求。 */
 	function init() {
+		uiMinEl.addEventListener('click', collapseUI);
+		uiPendingEl.addEventListener('click', expandUI);
 		uiCloseEl.addEventListener('click', () => answerUI(uiActive, { cancelled: true }));
 		bindSheetKeys(uiOverlayEl, moveUI, () => {
 			const item = uiActive;

@@ -90,6 +90,10 @@
 				<textarea id="input" rows="1" aria-label="输入消息" placeholder="输入消息…（/ 命令 · @ 引用文件 · 可拖拽或粘贴图片）"></textarea>
 				<div class="composer-toolbar">
 					<div class="composer-meta">
+						<button class="ui-pending" id="uiPending" type="button" hidden aria-haspopup="dialog" aria-controls="uiOverlay" title="展开被收起的插件请求">
+							<span class="ui-pending-mark" aria-hidden="true">❓</span>
+							<span class="ui-pending-text" id="uiPendingText"></span>
+						</button>
 						<div class="plugin-status" id="pluginStatus" hidden></div>
 						<div class="usage" id="usage" role="button" tabindex="0" aria-haspopup="dialog" title="点击查看 Codex / OpenCode 额度"></div>
 					</div>
@@ -170,6 +174,7 @@
 					<span class="picker-title" id="uiTitle">插件请求</span>
 					<div class="picker-head-right">
 						<span class="picker-key" id="uiKey">Esc 取消</span>
+						<button class="picker-close" id="uiMin" type="button" title="收起（先看历史，稍后再回答；不是取消）" aria-label="收起插件请求">–</button>
 						<button class="picker-close" id="uiClose" type="button" title="关闭（按默认值交回插件）" aria-label="关闭">✕</button>
 					</div>
 				</div>

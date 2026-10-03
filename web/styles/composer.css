@@ -207,3 +207,43 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* 收起后的插件提问入口：字体与插件状态同档，不受“插件状态”开关控制 */
+.ui-pending {
+	flex: 0 1 auto;
+	min-width: 0;
+	display: inline-flex;
+	align-items: baseline;
+	gap: 5px;
+	max-width: min(42vw, 320px);
+	padding: 1px 8px;
+	border: 1px solid rgba(var(--accent-rgb), 0.35);
+	border-radius: 999px;
+	background: rgba(var(--accent-rgb), 0.07);
+	color: var(--accent);
+	font: 10px/1.7 var(--mono); font-size: calc(10px * var(--font-scale));
+	cursor: pointer;
+}
+/* display:inline-flex 会盖掉 UA 的 [hidden]，没有待回答时也要真的不占位 */
+.ui-pending[hidden] {
+	display: none;
+}
+.ui-pending:hover {
+	background: rgba(var(--accent-rgb), 0.14);
+}
+.ui-pending:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 1px;
+}
+.ui-pending-mark {
+	flex: none;
+}
+.ui-pending-text {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+/* 窄屏状态栏本来就换行，入口独占一行时给足宽度，别把“待回答”省略掉 */
+@media (max-width: 560px) {
+	.ui-pending { max-width: 100%; }
+}
