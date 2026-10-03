@@ -257,6 +257,8 @@ export function createRequestHandler({ sdk, cwd, runtime, transport, ui, telemet
 				// 而回合可能卡在没传 AbortSignal 的插件对话框上，所以顺序必须是：
 				// 先调用 abort()（它在第一个 await 前已打完中止标记并调了 agent.abort()），
 				// 再放开对话框，否则两边互等，请求会一直挂到 10 分钟上限。
+				// 这是通用顺序：任何要等回合收尾的路径（中止、换会话、重载）都得先放开未决对话框；
+				// 换会话 / 重载那一侧在 session.mjs 的 boot() 与 plugin-ui 的 reset()。
 				const aborting = session ? session.abort() : null;
 				ui.settleAllUI();
 				if (aborting) await waitForAbort(aborting);

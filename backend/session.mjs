@@ -290,6 +290,8 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 	async function boot() {
 		// 换会话前先把旧会话手上的对话框交回（否则那些 Promise 永远不会被 resolve）、
 		// 把耗时的最后一批落盘、挂着的标题补发、攒着的回显帧补发（都依赖 active，必须在替换前调用）
+		// 顺序要求：必须在 dispose / 等回合收尾之前调用 —— SDK 等待收尾时回合可能正卡在对话框上，
+		// 只有这里能放开它，反过来就会互等（同类问题见 routes.mjs 的 POST /api/abort）。
 		ui.settleAllUI();
 		telemetry.rateReset();
 		ui.flushTitle();
