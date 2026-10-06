@@ -1,4 +1,5 @@
 /** 消息、流式内容、工具记录和行计时；全部状态随消息区复位。 */
+import { apiPath } from './conversation.mjs';
 import { renderMarkdown, closedMarkdownLength } from './markdown.mjs';
 
 /** 创建消息区；外部只注入运行状态读取和导航刷新操作。 */
@@ -589,8 +590,8 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			return;
 		}
 		if (type === 'image') {
-			// 历史里的图片由服务端给 /api/image 地址，本地刚发的那条用 blob 缩略图
-			const src = block.url || block.objectUrl || '';
+			// 历史里的图片由服务端给 /api/image 地址（不带对话 id，这里补上本页签的对话），本地刚发的那条用 blob 缩略图
+			const src = block.url ? apiPath(block.url) : block.objectUrl || '';
 			if (!src) return;
 			const image = document.createElement('img');
 			image.className = 'msg-image';

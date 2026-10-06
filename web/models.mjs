@@ -1,4 +1,5 @@
 /** 模型、思考等级与 Codex Fast 请求设置。 */
+import { apiPath } from './conversation.mjs';
 import { enterSheet, leaveSheet, bindSheetKeys, chip } from './sheets.mjs';
 
 /** 创建模型与思考等级选择；状态由实例自己维护。 */
@@ -174,7 +175,7 @@ export function createModels({ addStatusRow }) {
 		modelSearchEl.setSelectionRange(modelQuery.length, modelQuery.length);
 		let data = null;
 		try {
-			data = await (await fetch('/api/models')).json();
+			data = await (await fetch(apiPath('/api/models'))).json();
 		} catch {
 			if (modelOpen) {
 				modelNotice = '读取模型列表失败';
@@ -227,7 +228,7 @@ export function createModels({ addStatusRow }) {
 		if (!model) return;
 		const key = modelKey(model);
 		try {
-			const response = await fetch('/api/model', {
+			const response = await fetch(apiPath('/api/model'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ provider: model.provider, id: model.id, persist: Boolean(persist) }),
@@ -250,7 +251,7 @@ export function createModels({ addStatusRow }) {
 	async function applyThinkingLevel(level) {
 		if (!level || level === thinkLevel) return;
 		try {
-			const response = await fetch('/api/thinking', {
+			const response = await fetch(apiPath('/api/thinking'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ level }),
@@ -277,7 +278,7 @@ export function createModels({ addStatusRow }) {
 		fastUpdating = true;
 		renderFastBar();
 		try {
-			const response = await fetch('/api/fast', {
+			const response = await fetch(apiPath('/api/fast'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ enabled }),

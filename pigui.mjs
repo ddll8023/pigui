@@ -313,11 +313,11 @@ console.log(`pigui: 会话 → ${info.sessionFile ?? '(新会话尚未落盘)'}`
 if (displayName) console.log(`pigui: worktree → ${displayName}`);
 
 if (options.noOpen) {
-	console.log('pigui: 已跳过自动打开页签（--no-open）');
-} else if (await openInOrca(service.url)) {
+	console.log(`pigui: 已跳过自动打开页签（--no-open），页面地址 → ${service.tabUrl}`);
+} else if (await openInOrca(service.tabUrl)) {
 	console.log('pigui: 已在 Orca 中打开页签');
 } else {
-	console.log(`pigui: 未能通过 orca 打开页签（可能不在 Orca worktree 内），请手动打开 ${service.url}`);
+	console.log(`pigui: 未能通过 orca 打开页签（可能不在 Orca worktree 内），请手动打开 ${service.tabUrl}`);
 }
 console.log('pigui: Ctrl+C 停止服务');
 

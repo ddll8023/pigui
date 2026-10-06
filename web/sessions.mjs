@@ -1,4 +1,5 @@
 /** 会话选择、新建与回退 */
+import { apiPath } from './conversation.mjs';
 import { enterSheet, leaveSheet, bindSheetKeys } from './sheets.mjs';
 
 /** 创建会话选择、新建与回退；状态仅在实例内维护。 */
@@ -153,7 +154,7 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 		}
 		// 不论成功还是失败都要收起浮层，否则遮罩会一直盖住页面
 		try {
-			const response = await fetch('/api/switch', {
+			const response = await fetch(apiPath('/api/switch'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ sessionFile }),
@@ -168,11 +169,16 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 		}
 	}
 
-	/** 新建会话（顶栏按钮、/new 命令与命令提示条共用）。 */
+	/** 在当前页签新建会话（/new 命令与命令提示条共用；顶栏按钮改为开新页签）。 */
 	async function newSession() {
-		await fetch('/api/new', { method: 'POST' }).catch(() => {});
+		await fetch(apiPath('/api/new'), { method: 'POST' }).catch(() => {});
 		clearMessages();
 		addStatusRow('已开始新会话');
+	}
+
+	/** 在新页签里开一个新对话；新页签没有 ?c=，由页面自己新建一个会话。 */
+	function openNewConversation() {
+		window.open('/', '_blank');
 	}
 
 	/** 收集可回退的用户提问：只取有会话条目 id 的行；本地回显尚未拿到 id、或旧版本 SDK 不给 id 时不参与。 */
@@ -262,7 +268,7 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 	async function confirmRewind(item) {
 		if (!item || !item.entryId) return;
 		try {
-			const response = await fetch('/api/rewind', {
+			const response = await fetch(apiPath('/api/rewind'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ entryId: item.entryId }),
@@ -314,7 +320,7 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 		return true;
 	}
 
-	/** 注册会话和回退浮层，以及顶栏新建会话操作。 */
+	/** 注册会话和回退浮层，以及顶栏新对话（开新页签）操作。 */
 	function init() {
 		pickerCloseEl.addEventListener('click', closeSessionPicker);
 		rewindCloseEl.addEventListener('click', closeRewind);
@@ -330,8 +336,8 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 			const item = rewindItems[rewindIndex];
 			if (item) void confirmRewind(item);
 		});
-		document.getElementById('new').addEventListener('click', () => void newSession());
+		document.getElementById('new').addEventListener('click', openNewConversation);
 	}
 
-	return { init, setContext, isPickerOpen, isOpen, handleInputKey, openSessionPicker, openRewind, newSession };
+	return { init, setContext, isPickerOpen, isOpen, handleInputKey, openSessionPicker, openRewind, newSession, openNewConversation };
 }

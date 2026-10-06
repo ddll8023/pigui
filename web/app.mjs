@@ -1,4 +1,5 @@
 /** 页面组装与 SSE 分发；业务状态由各功能模块独立维护。 */
+import { apiPath, initConversation } from './conversation.mjs';
 import { createSettings } from './settings.mjs';
 import { initSheets } from './sheets.mjs';
 import { createMessages } from './messages.mjs';
@@ -93,8 +94,6 @@ function renderRunState() {
 	stateEl.dataset.busy = running || compacting ? 'true' : 'false';
 	stateEl.querySelector('.label').textContent = compacting ? '压缩中' : running ? '运行中' : '空闲';
 	models.setRunState(running || compacting);
-	// 新建会话的旧入口不检查 HTTP 错误，压缩期间禁用按钮，避免误清页面历史。
-	document.getElementById('new').disabled = compacting;
 	// 发送键在运行中兼作中止键，由编辑器自己维护外观与禁用态。
 	composer.setRunState(running, compacting);
 }
@@ -214,9 +213,31 @@ function handleFrame(frame) {
 	}
 }
 
+/** 对话失效检查的限频间隔：SSE 会按浏览器节奏反复重连，不能每次都打一次接口。 */
+const CONVERSATION_CHECK_INTERVAL_MS = 10000;
+
+/** 最近一次检查“对话是否还在服务端”的时刻。 */
+let lastConversationCheck = 0;
+
+/**
+ * 检查本页签绑定的对话是否还在服务端。
+ * 对话因空闲被回收、或服务重启后（页面还开着），SSE 会一直拿到 404 重连下去；
+ * 这时刷新页面，由 conversation.mjs 重新新建一个对话并写回地址栏，页面自己恢复。
+ */
+function verifyConversation() {
+	const now = Date.now();
+	if (now - lastConversationCheck < CONVERSATION_CHECK_INTERVAL_MS) return;
+	lastConversationCheck = now;
+	fetch(apiPath('/api/context'))
+		.then((response) => {
+			if (response.status === 404) window.location.reload();
+		})
+		.catch(() => {});
+}
+
 /** 建立 SSE 连接，保留浏览器自动重连与解析失败降级行为。 */
 function connect() {
-	const source = new EventSource('/api/events');
+	const source = new EventSource(apiPath('/api/events'));
 	// 保留现有异常降级，单帧失败不阻断后续流。
 	source.onmessage = (event) => {
 		try {
@@ -225,10 +246,11 @@ function connect() {
 			/* 忽略无法解析的帧。 */
 		}
 	};
-	// 断连期间更新顶栏，浏览器负责自动重连。
+	// 断连期间更新顶栏，浏览器负责自动重连；绑定失效时刷新页面换个新对话。
 	source.onerror = () => {
 		metaEl.textContent = '连接中断，正在重试…';
 		setBusy(false);
+		verifyConversation();
 	};
 	return source;
 }
@@ -243,9 +265,15 @@ composer.init();
 usage.init();
 resourceUsage.init();
 messages.showEmptyHint();
-// 先拉取上下文，随后由 SSE 持续同步。
-fetch('/api/context')
-	.then((response) => response.json())
-	.then((data) => renderContext(data.context))
-	.catch(() => {});
-connect();
+
+/** 先绑定本页签的对话（必要时新建），再用它的上下文填首屏并接上 SSE。 */
+async function start() {
+	const { context, reason } = await initConversation();
+	if (context) renderContext(context);
+	// 没绑上对话时接口会由服务端回退到已有对话，这里只把原因说清楚，不静默连错对话
+	else if (reason === 'limit') messages.addStatusRow('同时最多 8 个对话，新建失败；请先关掉一些页签', 'error');
+	else if (reason === 'unreachable') messages.addStatusRow('本地服务没有响应，正在重试…', 'error');
+	connect();
+}
+
+void start();

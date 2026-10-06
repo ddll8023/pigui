@@ -1,21 +1,50 @@
-/** SDK 会话生命周期、上下文投影和用户回显；不持有传输连接。 */
+/** SDK 会话生命周期、上下文投影和用户回显；不持有传输连接，一个实例只服务一个对话。 */
+import path from 'node:path';
 import { messageView, attachImageUrls, historyFrames, eventFrame } from './protocol.mjs';
+import { createTimings } from './timings.mjs';
+import { createTelemetry } from './telemetry.mjs';
+import { createPluginUI } from './plugin-ui.mjs';
 import { createResourceUsage } from './resource-usage.mjs';
 
 /** 提示条一行展示用的命令描述上限。 */
 const MAX_COMMAND_DESCRIPTION = 200;
 
-/** 创建会话控制器；切换时先收尾旧资源，再公布新会话和历史。 */
-export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, broadcast, timings, telemetry, ui }) {
+/**
+ * 创建一个会话实例（一个对话）。
+ *
+ * 每个实例独占自己的 SDK 会话、耗时记录、用量统计、插件界面与使用汇总；
+ * 事件经 transport 按 conversationId 分流，因此同进程里的多个实例互不干扰。
+ *
+ * @param {object} options 会话参数。
+ * @param {string} options.id 会话 id（注册表分配，用于事件分流）。
+ * @param {object} options.sdk 提供 createAgentSession 与 SessionManager 的 pi SDK。
+ * @param {string} options.cwd 工作目录，决定资源发现与会话归属。
+ * @param {'continue'|'new'} [options.mode='new'] 未指定会话文件时的启动方式。
+ * @param {string} [options.sessionPath=''] 优先打开的会话文件。
+ * @param {boolean} [options.pluginUi=true] 是否把插件的 ctx.ui 接到页面上。
+ * @param {object} options.transport 传输实例，提供 broadcastTo 与 getClientCount。
+ * @param {(text: string) => void} [options.onLog] 日志回调。
+ */
+export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionPath = '', pluginUi = true, transport, onLog = () => {} }) {
 	/**
 	 * pi 的技能块解析器。
 	 * 老版本 SDK 没有 parseSkillBlock 时置空，技能消息退化成普通文本（与改动前一致）。
 	 */
 	const parseSkill = typeof sdk.parseSkillBlock === 'function' ? sdk.parseSkillBlock : undefined;
-	const resourceUsage = createResourceUsage({ cwd, parseSkill, broadcast });
 
 	/** 当前会话：{ session, unsubscribe }。 */
 	let active = null;
+
+	/** 只发给本会话页面的帧。 */
+	const broadcast = (frame) => transport.broadcastTo(id, frame);
+
+	/** 本会话的页面连接数，供插件断连宽限判断。 */
+	const getClientCount = () => transport.getClientCount(id);
+
+	const timings = createTimings({ getSession, broadcast, onLog });
+	const telemetry = createTelemetry({ sdk, getSession, broadcast });
+	const ui = createPluginUI({ broadcast, getClientCount });
+	const resourceUsage = createResourceUsage({ cwd, parseSkill, broadcast });
 
 	/** Fast 仅属于当前会话，不写全局配置或会话文件。 */
 	let fastEnabled = false;
@@ -223,6 +252,7 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		const session = active?.session;
 		const model = session?.model;
 		return {
+			conversationId: id,
 			cwd,
 			sessionId: session?.sessionId ?? null,
 			sessionFile: session?.sessionFile ?? null,
@@ -282,6 +312,27 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 			return null;
 		}
 		return null;
+	}
+
+	/** 当前实例持有的会话文件（还没落到磁盘时为空串）。 */
+	function currentSessionFile() {
+		const manager = active?.session?.sessionManager;
+		if (typeof manager?.getSessionFile === 'function') {
+			const file = manager.getSessionFile();
+			if (typeof file === 'string' && file) return file;
+		}
+		return typeof active?.session?.sessionFile === 'string' ? active.session.sessionFile : '';
+	}
+
+	/**
+	 * 本实例是否正持有某个会话文件。
+	 * 同一份 JSONL 被两个对话同时打开会互相干扰，注册表据此拒绝。
+	 */
+	function hasSessionFile(file) {
+		const wanted = typeof file === 'string' ? file.trim() : '';
+		const current = currentSessionFile();
+		if (!wanted || !current) return false;
+		return path.resolve(wanted) === path.resolve(current);
 	}
 
 	/**
@@ -483,5 +534,21 @@ export function createSessionRuntime({ sdk, cwd, mode, sessionPath, pluginUi, br
 		try { active?.session?.dispose(); } catch {}
 	}
 
-	return { getSession, isBusy, isReloading, isCompacting, fastInfo, setFast, compact, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, newSession, switchSession, flushUserEcho, dispose };
+	/** 把本会话的耗时立刻落盘（换会话前、进程退出前调用）。 */
+	function flushTimings() { timings.flushTimings(); }
+
+	/**
+	 * 释放本会话：先放开插件对话框与计时、落盘，再解除订阅并释放 SDK 会话。
+	 * 会话内部的先后与原服务关闭时一致，避免插件 Promise 悬挂或丢最后一次耗时。
+	 */
+	function close() {
+		ui.close();
+		telemetry.close();
+		flushUserEcho();
+		flushTimings();
+		dispose();
+		active = null;
+	}
+
+	return { id, broadcast, ui, telemetry, getSession, isBusy, isReloading, isCompacting, fastInfo, setFast, compact, reload, boot, sessionInfo, currentViews, broadcastHistory, broadcastSession, availableThinkingLevels, sameModel, availableModels, defaultModel, findSessionImage, hasSessionFile, newSession, switchSession, flushUserEcho, flushTimings, close, dispose };
 }

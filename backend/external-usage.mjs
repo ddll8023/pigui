@@ -12,8 +12,15 @@ const EXTERNAL_USAGE_TTL_MS = 60000;
 /** 外部额度请求超时。 */
 const EXTERNAL_USAGE_TIMEOUT_MS = 10000;
 
-/** 创建外部账号额度查询与缓存；资源和状态由实例持有。 */
-export function createExternalUsage({ sdk, getSession }) {
+/**
+ * 创建外部账号额度查询与缓存；资源和状态由实例持有。
+ *
+ * @param {object} options 组装参数。
+ * @param {object} options.sdk pi SDK，提供 readStoredCredential 兜底。
+ * @param {() => object|null} options.getModelRuntime 取一份可用的 ModelRuntime（用于 OAuth 自动刷新）；
+ *   额度是账号级的，不绑定某个对话，因此取不到时退回文件读取。
+ */
+export function createExternalUsage({ sdk, getModelRuntime }) {
 	/** 外部额度缓存：{ at, value }，TTL 内直接复用。 */
 	let externalUsageCache = null;
 
@@ -28,7 +35,7 @@ export function createExternalUsage({ sdk, getSession }) {
 
 	/** 从 pi 的凭据里取某个 provider 的 key / access token（取不到或出错都返回空串）。 */
 	async function providerKey(providerId) {
-		const runtime = getSession()?.modelRuntime;
+		const runtime = getModelRuntime();
 		if (typeof runtime?.getAuth === 'function') {
 			try {
 				// 走 ModelRuntime 的好处：OAuth 过期时由 pi 自己刷新
@@ -39,7 +46,7 @@ export function createExternalUsage({ sdk, getSession }) {
 				/* 落到下面的文件读取 */
 			}
 		}
-		// 兜底：直接从 pi 的 auth.json 读一次（老版本 SDK 没有 getAuth，或 provider 不在模型目录里）
+		// 兜底：直接从 pi 的 auth.json 读一次（没有存活会话、老版本 SDK 没有 getAuth，或 provider 不在模型目录里）
 		try {
 			if (typeof sdk.readStoredCredential !== 'function') return '';
 			const credential = sdk.readStoredCredential(providerId);

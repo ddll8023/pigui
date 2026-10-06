@@ -1,4 +1,5 @@
 /** 编辑器、补全与附件发送 */
+import { apiPath } from './conversation.mjs';
 
 /** 创建编辑器、补全与附件发送；状态由实例自己维护。 */
 export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
@@ -17,7 +18,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	const COMMANDS = [
 		{ name: '/resume', desc: '切换会话', kind: 'action' },
 		{ name: '/model', desc: '切换模型 / 思考等级', kind: 'action' },
-		{ name: '/new', desc: '新建会话', kind: 'action' },
+		{ name: '/new', desc: '新建会话（留在本页）', kind: 'action' },
 		{ name: '/rewind', desc: '回退到某条提问之前', kind: 'action' },
 		{ name: '/reload', desc: '重载扩展 / 技能 / 提示模板与配置', kind: 'action' },
 		{ name: '/compact', desc: '手动压缩上下文，可附摘要要求', kind: 'action' },
@@ -217,7 +218,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 			fileFetchTimer = 0;
 			let files = [];
 			try {
-				const response = await fetch('/api/files?q=' + encodeURIComponent(query));
+				const response = await fetch(apiPath('/api/files?q=' + encodeURIComponent(query)));
 				const data = await response.json();
 				files = Array.isArray(data.files) ? data.files : [];
 			} catch {
@@ -333,7 +334,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	/** 中止当前回合；失败时给出提示，不再像旧顶栏入口那样静默。 */
 	async function abortRun() {
 		try {
-			const response = await fetch('/api/abort', { method: 'POST' });
+			const response = await fetch(apiPath('/api/abort'), { method: 'POST' });
 			if (!response.ok) throw new Error('HTTP ' + response.status);
 		} catch (err) {
 			addStatusRow('中止失败：' + String((err && err.message) || err), 'error');
@@ -485,7 +486,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	/** 原地重载服务端资源；会话帧会同步最新命令与插件错误，不刷新页面。 */
 	async function reloadResources() {
 		try {
-			const response = await fetch('/api/reload', { method: 'POST' });
+			const response = await fetch(apiPath('/api/reload'), { method: 'POST' });
 			const data = await response.json();
 			if (!response.ok) throw new Error(data.error || '服务端拒绝重载');
 			addStatusRow('资源已重载');
@@ -497,7 +498,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 	/** 请求手动压缩，显示结果；不创建用户消息，也不把命令交给模型。 */
 	async function compactContext(instructions) {
 		try {
-			const response = await fetch('/api/compact', {
+			const response = await fetch(apiPath('/api/compact'), {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ instructions }),
@@ -579,7 +580,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		clearAttachments({ revoke: false });
 		addUserMessage(text, previews);
 		followFrame(pinnedToBottom());
-		await fetch('/api/prompt', {
+		await fetch(apiPath('/api/prompt'), {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify(images.length ? { message: text, images } : { message: text }),

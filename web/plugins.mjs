@@ -1,4 +1,5 @@
 /** 插件页面交互 */
+import { apiPath } from './conversation.mjs';
 import { enterSheet, leaveSheet, bindSheetKeys } from './sheets.mjs';
 
 /** 创建插件页面交互；状态由实例自己维护。 */
@@ -316,7 +317,7 @@ export function createPlugins({ addStatusRow, setEditorText }) {
 		uiQueue = uiQueue.filter((entry) => entry.id !== item.id);
 		hideUI();
 		showNextUI();
-		void fetch('/api/ui-response', {
+		void fetch(apiPath('/api/ui-response'), {
 			method: 'POST',
 			headers: { 'content-type': 'application/json' },
 			body: JSON.stringify({ id: item.id, ...response }),

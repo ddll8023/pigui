@@ -70,6 +70,7 @@ export function parseImages(body) {
 const ASSETS = new Map([
 	['GET /', [new URL('../index.html', import.meta.url), 'text/html; charset=utf-8']],
 	['GET /assets/app.mjs', [new URL('../web/app.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
+	['GET /assets/conversation.mjs', [new URL('../web/conversation.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/settings.mjs', [new URL('../web/settings.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/sheets.mjs', [new URL('../web/sheets.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
 	['GET /assets/markdown.mjs', [new URL('../web/markdown.mjs', import.meta.url), 'text/javascript; charset=utf-8']],
@@ -99,35 +100,53 @@ export async function serveAsset(route, res) {
 
 /** 创建传输实例，不拥有会话或插件业务状态。 */
 export function createTransport() {
-	/** 已连接的 SSE 响应，归当前服务实例所有。 */
-	const clients = new Set();
+	/** 已连接的 SSE 响应，按会话分组：conversationId → Set<res>。 */
+	const clients = new Map();
 
-	/** 向所有页面推一帧 SSE。 */
-	function broadcast(frame) {
-		if (!frame) return;
+	/** 把一帧 SSE 写进给定连接集合；写失败的连接就地移除。 */
+	function writeFrame(targets, frame) {
 		let line = `data: ${JSON.stringify(frame)}\n\n`;
 		if (Buffer.byteLength(line) > MAX_FRAME_BYTES) {
 			line = `data: ${JSON.stringify({ kind: 'event', type: 'frame_truncated' })}\n\n`;
 		}
-		for (const client of clients) {
+		for (const client of targets) {
 			try {
 				client.write(line);
 			} catch {
-				clients.delete(client);
+				targets.delete(client);
 			}
 		}
 	}
 
-	/** 读取活跃连接数供插件断连宽限判断，调用方不能修改连接集合。 */
-	function getClientCount() { return clients.size; }
+	/** 只向某个会话的页面推一帧；会话之间的事件互不可见。 */
+	function broadcastTo(conversationId, frame) {
+		if (!frame) return;
+		const targets = clients.get(conversationId);
+		if (!targets) return;
+		writeFrame(targets, frame);
+	}
+
+	/** 向所有会话推同一帧；只用于无法归属到某个会话的致命错误。 */
+	function broadcastAll(frame) {
+		if (!frame) return;
+		for (const targets of clients.values()) writeFrame(targets, frame);
+	}
+
+	/** 读取某个会话的活跃连接数供插件断连宽限判断，调用方不能修改连接集合。 */
+	function getClientCount(conversationId) { return clients.get(conversationId)?.size ?? 0; }
 
 	/** 建连后按原顺序补发会话、历史与未决 UI，关闭时释放心跳。 */
-	function openEvents(req, res, { sessionInfo, history, resendPendingUI, onConnect, onDisconnect }) {
+	function openEvents(req, res, { conversationId, sessionInfo, history, resendPendingUI, onConnect, onDisconnect }) {
 		res.writeHead(200, {
 			'content-type': 'text/event-stream; charset=utf-8',
 			'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no',
 		});
-		clients.add(res);
+		let targets = clients.get(conversationId);
+		if (!targets) {
+			targets = new Set();
+			clients.set(conversationId, targets);
+		}
+		targets.add(res);
 		onConnect();
 		res.write(`data: ${JSON.stringify({ kind: 'session', info: sessionInfo() })}\n\n`);
 		for (const frame of history()) res.write(`data: ${JSON.stringify(frame)}\n\n`);
@@ -139,18 +158,24 @@ export function createTransport() {
 		// 客户端断开后再开始插件宽限期，刷新不会立即取消对话框。
 		req.on('close', () => {
 			clearInterval(keepAlive);
-			clients.delete(res);
-			if (clients.size === 0) onDisconnect();
+			targets.delete(res);
+			// 只在本会话最后一个页面断开时通知调用方，避免影响其它对话的等待
+			if (targets.size === 0) {
+				clients.delete(conversationId);
+				onDisconnect();
+			}
 		});
 	}
 
 	/** 服务关闭时结束全部响应；请求 close 事件负责释放心跳。 */
 	function closeClients() {
-		for (const client of clients) {
-			try { client.end(); } catch {}
+		for (const targets of clients.values()) {
+			for (const client of targets) {
+				try { client.end(); } catch {}
+			}
 		}
 		clients.clear();
 	}
 
-	return { broadcast, getClientCount, openEvents, closeClients };
+	return { broadcastTo, broadcastAll, getClientCount, openEvents, closeClients };
 }
