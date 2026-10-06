@@ -37,7 +37,7 @@ export function createTimings({ getSession, broadcast, onLog }) {
 	/** 当前回合：{ startedAt, keyMessage, entryId }；首个 agent_start 开始，agent_settled 结束。 */
 	let turn = null;
 
-	/** 写盘合并窗口的句柄，以及「过期清理只做一次」标记。 */
+	/** 写盘合并窗口的句柄，以及「过期清理只扫一次」标记（每个对话实例各扫一次）。 */
 	let timingFlushTimer = null;
 
 	let timingsPruned = false;
@@ -157,7 +157,7 @@ export function createTimings({ getSession, broadcast, onLog }) {
 		pruneTimings(file);
 	}
 
-	/** 清理同一个会话目录里过期的耗时文件；每个进程只扫一次，不动当前会话自己的文件。 */
+	/** 清理同一个会话目录里过期的耗时文件；每个实例只扫一次，不动当前会话自己的文件。 */
 	function pruneTimings(currentFile) {
 		if (timingsPruned) return;
 		timingsPruned = true;

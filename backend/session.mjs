@@ -139,7 +139,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 		return (session?.state?.messages ?? []).map((message) => timings.withTiming(messageView(message, '', parseSkill), ''));
 	}
 
-	/** 广播当前上下文路径的完整历史（建连、新建/切换会话、回退之后都要让页面重放）。 */
+	/** 把当前上下文路径的完整历史发给本对话的页面（建连、新建/切换会话、回退之后都要重放）。 */
 	function broadcastHistory() {
 		for (const frame of historyFrames(currentViews())) broadcast(frame);
 	}
@@ -447,7 +447,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 		return active;
 	}
 
-	/** 读取当前会话，供计时、用量和额度模块使用，不暴露 active 容器。 */
+	/** 读取当前会话，供计时与用量模块使用，不暴露 active 容器。 */
 	function getSession() { return active?.session; }
 
 	/** 读取回合运行状态，保留 prompt 自动转 steer 的判断来源。 */

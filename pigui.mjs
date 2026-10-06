@@ -9,7 +9,7 @@
  *   依次尝试 PIGUI_PI_SDK → PI_MANAGED_INSTALL_ROOT → ~/.pi/agent/install/current-version
  *   → npm 全局根目录 → PATH 里的 pi 可执行文件 → 当前项目依赖；
  * - cwd 取当前目录，因此"在哪个 worktree 跑，页面就是哪个 worktree"；
- * - 页面用 orca tab create 打开，页签绑定当前 worktree。
+ * - 页面用 orca tab create 打开，页签地址带 ?c=<对话 id>，按它绑定到对应对话。
  */
 
 import { spawn, spawnSync } from 'node:child_process';
@@ -51,11 +51,11 @@ function printHelp() {
   pigui [选项]
 
 选项：
-  --no-open          只起服务，不调用 orca 打开页签（会打印地址）
+  --no-open          只起服务并打印页签地址（带 ?c=），不调用 orca 打开页签
   --port <n>         指定端口（默认由系统自动分配）
-  --new              新建会话（默认行为）
-  --continue         恢复该目录最近一次会话（可能正被 Orca / pi 使用，慎用）
-  --session <path>   打开指定的会话文件（优先于 --new / --continue）
+  --new              启动时的首个对话新建会话（默认行为）
+  --continue         启动时的首个对话恢复该目录最近一次会话（可能正被 Orca / pi 使用，慎用）
+  --session <path>   启动时的首个对话打开指定的会话文件（优先于 --new / --continue）
   --no-plugin-ui     不把插件的 ctx.ui 接到页面上（插件退回“没有交互界面”的行为）
   -h, --help         显示本帮助
 

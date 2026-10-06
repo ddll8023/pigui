@@ -1,6 +1,6 @@
 /** 插件 UI 桥接与请求收尾 */
 
-/** 页面全断开后，还等这么久再把手上的插件对话框按默认值收尾，避免刷新页面把回合挂死。 */
+/** 本对话的页面全断开后，还等这么久再把手上的插件对话框按默认值收尾，避免刷新页面把回合挂死。 */
 const UI_DISCONNECT_GRACE_MS = 30000;
 
 /** 单个插件对话框的总上限：插件自己没设超时、或干脆不 await（fire-and-forget）时，超过就按默认值收尾。 */
@@ -31,7 +31,7 @@ export function createPluginUI({ broadcast, getClientCount }) {
 	 */
 	const pendingUI = new Map();
 
-	/** 页面全断开后的收尾计时器。 */
+	/** 本对话的页面全断开后的收尾计时器。 */
 	let uiGraceTimer = null;
 
 	/** 最近一条插件通知，用于 1 秒内相同通知去重。 */
@@ -100,12 +100,12 @@ export function createPluginUI({ broadcast, getClientCount }) {
 		return true;
 	}
 
-	/** 把所有挂起对话框按默认值收尾（页面全断开、进程退出时用）。 */
+	/** 把所有挂起对话框按默认值收尾（本对话的页面全断开、进程退出时用）。 */
 	function settleAllUI() {
 		for (const [id, entry] of [...pendingUI]) settleUI(id, uiDefault(entry.method));
 	}
 
-	/** 没有页面接上时启动收尾计时（每次新的等待都重新计时）；有页面接上就取消。 */
+	/** 本对话没有页面接上时启动收尾计时（每次新的等待都重新计时）；有页面接上就取消。 */
 	function scheduleUIGrace() {
 		if (uiGraceTimer) clearTimeout(uiGraceTimer);
 		uiGraceTimer = setTimeout(() => {

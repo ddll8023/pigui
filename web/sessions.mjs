@@ -145,7 +145,7 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 		renderPicker();
 	}
 
-	/** 切换到指定会话（服务端会广播历史，页面自动重放）。 */
+	/** 切换到指定会话（服务端把历史发给本对话的页面，页面自动重放）。 */
 	async function switchSession(sessionFile) {
 		if (!sessionFile) return;
 		if (samePath(sessionFile, currentSessionPath)) {
@@ -264,7 +264,7 @@ export function createSessions({ addStatusRow, clearMessages, setEditorText, isB
 		renderRewind();
 	}
 
-	/** 执行回退：服务端移动会话叶子并广播历史，原提问文本回到输入框供编辑重发。 */
+	/** 执行回退：服务端移动会话叶子并把历史发给本对话的页面，原提问文本回到输入框供编辑重发。 */
 	async function confirmRewind(item) {
 		if (!item || !item.entryId) return;
 		try {

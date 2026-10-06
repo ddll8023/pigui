@@ -413,7 +413,7 @@ export function createRequestHandler({ sdk, cwd, registry, transport, workspace,
 					}
 					const status = err?.status === 400 || err?.status === 409 ? err.status
 						: /Already compacted|Nothing to compact/i.test(error) ? 400 : 500;
-					// 手动压缩由发起页面展示 HTTP 结果，不再广播一份重复的全局错误。
+					// 手动压缩由发起页面展示 HTTP 结果，不再额外广播错误帧。
 					return send(res, status, { error }, { 'content-type': 'application/json' });
 				}
 			}
