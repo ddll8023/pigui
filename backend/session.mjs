@@ -5,6 +5,7 @@ import { createTimings } from './timings.mjs';
 import { createTelemetry } from './telemetry.mjs';
 import { createPluginUI } from './plugin-ui.mjs';
 import { createResourceUsage } from './resource-usage.mjs';
+import { createFileUsage } from './file-usage.mjs';
 
 /** 提示条一行展示用的命令描述上限。 */
 const MAX_COMMAND_DESCRIPTION = 200;
@@ -12,7 +13,7 @@ const MAX_COMMAND_DESCRIPTION = 200;
 /**
  * 创建一个会话实例（一个对话）。
  *
- * 每个实例独占自己的 SDK 会话、耗时记录、用量统计、插件界面与使用汇总；
+ * 每个实例独占自己的 SDK 会话、耗时记录、用量统计、插件界面、使用汇总与文件汇总；
  * 事件经 transport 按 conversationId 分流，因此同进程里的多个实例互不干扰。
  *
  * @param {object} options 会话参数。
@@ -45,6 +46,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 	const telemetry = createTelemetry({ sdk, getSession, broadcast });
 	const ui = createPluginUI({ broadcast, getClientCount });
 	const resourceUsage = createResourceUsage({ cwd, parseSkill, broadcast });
+	const fileUsage = createFileUsage({ cwd, broadcast });
 
 	/** Fast 仅属于当前会话，不写全局配置或会话文件。 */
 	let fastEnabled = false;
@@ -275,6 +277,8 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 			commands: slashCommands(session),
 			// 当前完整分支的实际使用汇总，不把加载列表当使用记录。
 			resourceUsage: resourceUsage.snapshot(),
+			// 当前完整分支读取 / 修改过的文件，只认成功的 read / edit / write。
+			fileUsage: fileUsage.snapshot(),
 			// 插件加载失败列表（页面一次性提示，避免静默失效）
 			pluginErrors,
 			pid: process.pid,
@@ -349,6 +353,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 		flushUserEcho();
 		timings.flushTimings();
 		resourceUsage.dispose();
+		fileUsage.dispose();
 		if (active) {
 			try {
 				active.unsubscribe();
@@ -400,7 +405,10 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 			if (type === 'agent_settled') telemetry.rateReset();
 			// 先补发攒着的回显帧，再推这一帧，对外顺序与不延迟时一致
 			flushUserEcho();
-			if (active?.session === session) resourceUsage.track(event);
+			if (active?.session === session) {
+				resourceUsage.track(event);
+				fileUsage.track(event);
+			}
 			broadcast(eventFrame(event, extra, parseSkill));
 			if (type === 'compaction_start') broadcastSession();
 			if (type === 'compaction_end') {
@@ -413,6 +421,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 		});
 		active = { session, unsubscribe, restoreFast: attachFastRequests(session) };
 		resourceUsage.bind(session);
+		fileUsage.bind(session);
 		busy = false;
 		timings.resetRun();
 		pluginErrors = (extensionsResult?.errors ?? []).slice(0, 5).map((item) => ({
@@ -529,6 +538,7 @@ export function createConversationRuntime({ id, sdk, cwd, mode = 'new', sessionP
 	/** 解除会话订阅并释放 SDK 会话；调用方必须先补发回显和落盘。 */
 	function dispose() {
 		resourceUsage.dispose();
+		fileUsage.dispose();
 		try { active?.unsubscribe(); } catch {}
 		try { active?.restoreFast?.(); } catch {}
 		try { active?.session?.dispose(); } catch {}

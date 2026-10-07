@@ -412,6 +412,35 @@
 	color: var(--faint);
 }
 
+/* ---------- 汇总浮层：文件 / 使用汇总两个标签 ---------- */
+.summary-tabs {
+	flex: none;
+	display: flex;
+	gap: 4px;
+	padding: 8px var(--sheet-pad-x);
+	border-bottom: 1px solid var(--line);
+}
+.summary-tab {
+	padding: 4px 12px;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	background: transparent;
+	color: var(--muted);
+	font: 12px/1.5 var(--sans); font-size: calc(12px * var(--font-scale));
+}
+.summary-tab:hover { color: var(--text); }
+.summary-tab[aria-selected="true"] {
+	border-color: var(--line-strong);
+	background: var(--think-bg);
+	color: var(--text);
+	font-weight: 600;
+}
+/* 汇总条目只读：不提供选中 / 跳转，路径与名称用等宽字体 */
+#summaryFiles .picker-item, #summaryUsage .picker-item { cursor: default; }
+#summaryFiles .picker-item:hover, #summaryUsage .picker-item:hover { background: none; }
+#summaryFiles .picker-item .title, #summaryUsage .picker-item .title { font-family: var(--mono); }
+#summaryUsage .picker-group:first-child { padding-top: 4px; }
+
 /* ---------- 插件对话框与状态（扩展 UI） ---------- */
 /* 插件标题只标识交互类型；完整提问放在下方可滚动正文中。 */
 #uiOverlay .picker-head {

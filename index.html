@@ -31,7 +31,6 @@
 		<link rel="stylesheet" href="/assets/styles/messages.css" />
 		<link rel="stylesheet" href="/assets/styles/composer.css" />
 		<link rel="stylesheet" href="/assets/styles/overlays.css" />
-		<link rel="stylesheet" href="/assets/styles/resource-usage.css" />
 		<link rel="stylesheet" href="/assets/styles/responsive.css" />
 	</head>
 	<body>
@@ -52,30 +51,13 @@
 				<div class="topbar-actions">
 					<button id="settingsToggle" type="button" title="设置（/settings）：主题 / 字号 / 状态栏" aria-label="设置">设置</button>
 					<button id="nav" title="消息目录（跳到某条消息）">目录</button>
+					<button id="summary" title="本会话的文件与使用汇总">汇总</button>
 					<button id="new" title="在新页签里开始一个新对话">新对话</button>
 				</div>
 			</div>
 		</header>
 
 		<main id="messages" aria-label="会话消息"></main>
-
-		<aside class="resource-usage" id="resourceUsage" aria-label="会话使用汇总" hidden>
-			<button class="resource-toggle" id="resourceUsageToggle" type="button" aria-expanded="false" aria-haspopup="dialog" aria-controls="resourceUsagePanel" title="查看本会话使用过的插件与 Skill">
-				<span class="resource-mark" aria-hidden="true">◇</span>
-				<span>插件 <strong id="resourcePluginCount">0</strong></span>
-				<span class="resource-separator" aria-hidden="true">·</span>
-				<span>Skill <strong id="resourceSkillCount">0</strong></span>
-				<span class="resource-chevron" aria-hidden="true">▾</span>
-			</button>
-			<section class="resource-panel" id="resourceUsagePanel" role="dialog" aria-labelledby="resourceUsageTitle" aria-describedby="resourceUsageFoot" hidden>
-				<div class="resource-head">
-					<h2 id="resourceUsageTitle">本会话已使用</h2>
-					<button class="resource-close" id="resourceUsageClose" type="button" title="关闭（Esc）" aria-label="关闭使用汇总">✕</button>
-				</div>
-				<div class="resource-body" id="resourceUsageBody" tabindex="0" aria-label="插件与 Skill 列表"></div>
-				<p class="resource-foot" id="resourceUsageFoot"></p>
-			</section>
-		</aside>
 
 		<footer id="composer">
 			<div class="plugin-widget" id="widgetAbove" hidden></div>
@@ -137,6 +119,25 @@
 				</div>
 				<ul class="picker-list" id="navList"></ul>
 				<div class="picker-foot">列出本会话的每条提问，点条目跳到对应位置</div>
+			</div>
+		</div>
+
+		<div class="overlay" id="summaryOverlay" hidden>
+			<div class="picker w-list" role="dialog" aria-modal="true" aria-labelledby="summaryTitle" tabindex="-1">
+				<div class="picker-head">
+					<span class="picker-title" id="summaryTitle">本会话</span>
+					<div class="picker-head-right">
+						<span class="picker-key">Esc 关闭</span>
+						<button class="picker-close" id="summaryClose" type="button" title="关闭（Esc）" aria-label="关闭汇总">✕</button>
+					</div>
+				</div>
+				<div class="summary-tabs" role="tablist" aria-label="切换汇总视图">
+					<button class="summary-tab" id="summaryTabFiles" type="button" role="tab" aria-selected="true" aria-controls="summaryFiles">文件</button>
+					<button class="summary-tab" id="summaryTabUsage" type="button" role="tab" aria-selected="false" aria-controls="summaryUsage">使用汇总</button>
+				</div>
+				<ul class="picker-list" id="summaryFiles" role="tabpanel" aria-labelledby="summaryTabFiles" tabindex="0"></ul>
+				<ul class="picker-list" id="summaryUsage" role="tabpanel" aria-labelledby="summaryTabUsage" tabindex="0" hidden></ul>
+				<div class="picker-foot" id="summaryFoot"></div>
 			</div>
 		</div>
 
