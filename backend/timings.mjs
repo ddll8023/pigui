@@ -181,12 +181,21 @@ export function createTimings({ getSession, broadcast, onLog }) {
 
 	/**
 	 * 按 pi 事件维护计时状态，并向页面推 timer 帧；返回值是给 eventFrame 的附加字段。
-	 * 口径：单条 = 一次模型调用（message_start → message_end，含等待首 token，不含工具执行）；
+	 * 口径：单条 = 一次模型调用（turn_start → message_end，含从请求发出到响应到达的等待、首 token 与思考，不含工具执行）；
 	 *       回合 = 首个 agent_start → agent_settled（含工具执行、重试与续跑）。
 	 */
 	function trackTiming(event) {
 		const type = event?.type;
+		// turn_start 是每次模型请求发出前的最后一个事件：从它开始计时才能覆盖响应到达前的等待。
+		// 这个帧同时是“这次调用开始了”的信号，页面靠它在工具跑完后重新显示等待提示。
+		if (type === 'turn_start') {
+			messageTimer = { startedAt: Date.now() };
+			broadcast({ kind: 'timer', scope: 'message', phase: 'start', startedAt: messageTimer.startedAt });
+			return null;
+		}
+		// 拿不到 turn_start 时退回 message_start，但不重开已经跑着的表
 		if (type === 'message_start' && event.message?.role === 'assistant') {
+			if (messageTimer) return null;
 			messageTimer = { startedAt: Date.now() };
 			broadcast({ kind: 'timer', scope: 'message', phase: 'start', startedAt: messageTimer.startedAt });
 			return null;

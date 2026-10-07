@@ -10,7 +10,7 @@ const MAX_BLOCK_TEXT = 48 * 1024;
 const DEBUG = Boolean(process.env.PIGUI_DEBUG);
 
 /** 默认不转发的高频/噪声事件（页面渲染不需要，只会刷屏）。 */
-const QUIET_EVENT_TYPES = new Set(['tool_execution_update', 'message_start', 'turn_start']);
+const QUIET_EVENT_TYPES = new Set(['tool_execution_update', 'message_start']);
 
 /**
  * 从任意值里尽量抽出文本：字符串直接用，数组按行拼接，对象找常见文本字段。
@@ -215,7 +215,8 @@ export function historyFrames(views) {
 
 /**
  * 把 session 事件压成页面可用的小帧；返回 null 表示这个事件不需要发给页面。
- * 默认过滤高频噪声事件（tool_execution_update / message_start / turn_start），PIGUI_DEBUG=1 时不过滤。
+ * 默认过滤高频噪声事件（tool_execution_update / message_start），PIGUI_DEBUG=1 时不过滤；
+ * turn_start 要转发：它是每次模型请求发出前的最后一个事件，页面靠它重新显示等待提示。
  * extra 是调用方注入的实测信息，目前只有 message_end 的单次耗时 durationMs。
  * parseSkill 是 pi SDK 的 parseSkillBlock，用户消息命中技能块时交给 messageView 压成“名称 + 参数”。
  */

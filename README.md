@@ -217,7 +217,7 @@ pigui
 
 口径：
 
-- 单条 = `message_start` → `message_end`，**包含**等待首 token 与思考时间，**不包含**随后的工具执行；
+- 单条 = `turn_start` → `message_end`，**包含**从请求发出到响应到达的等待、首 token 与思考时间，**不包含**随后的工具执行；
 - 回合 = 首个 `agent_start` → `agent_settled`，包含多次模型调用、全部工具执行、自动重试与续跑（中止也照实记录）。
 
 耗时**不看 pi 的消息时间戳**（`AssistantMessage.timestamp` 是流开始时刻，JSONL 里没有结束时间），而是由服务端在事件回调里实测，所以历史会话也能显示：
@@ -239,7 +239,7 @@ pigui
 
 - `↑` / `↓`：累计输入、输出 tokens；`R` / `W`：缓存读、缓存写 tokens；`$`：累计费用（三位小数）。短格式同 `↑1.2K`（`K` / `M` 保留一位小数），数据来自 `session.getSessionStats()`；浮层里每个数字悬停都有中文图例。
 - `上下文 45.2%/200K`：当前上下文占用与窗口大小，来自 `session.getContextUsage()`；浮层里这一行带**进度条**，占用 ≥ 70% 条变淡红、≥ 90% 变正红；压缩后到下一次模型响应前百分比可能是未知的，显示为 `?`。
-- `实 42.1 t/s`：生成中的**实时速率**——2 秒滑动窗口内的输出 tokens 增速，每 250ms 重算一次（所以停止输出后数字会自己衰减，超过 2 秒没新输出就隐藏）；`均 18.3 t/s` 是**上一次模型调用**的平均速率，等于该次输出 tokens ÷ 实测耗时（与“耗时显示”同一份实测值，口径为 `message_start` → `message_end`）。
+- `实 42.1 t/s`：生成中的**实时速率**——2 秒滑动窗口内的输出 tokens 增速，每 250ms 重算一次（所以停止输出后数字会自己衰减，超过 2 秒没新输出就隐藏）；`均 18.3 t/s` 是**上一次模型调用**的平均速率，等于该次输出 tokens ÷ 实测耗时（与“耗时显示”同一份实测值，口径为 `turn_start` → `message_end`，因此包含响应到达前的等待）。
 - 数据来源：优先用 provider 回报的 `usage.output`，provider 不报时退化为 SDK 的 `estimateTokens` 估算，因此数字可能有偏差。
 - 费用依赖模型定价表；provider 不报 usage 或模型没定价时相关字段为 0。
 - 老版本 pi SDK 没有统计入口时整行显示`用量 —`，其余功能不受影响。
@@ -376,7 +376,7 @@ SSE 帧类型：`session`（上下文/模型/模型名/思考等级/busy/compact
 
 **消息结构**：`{ role, text, blocks, entryId, skill? }`。`blocks` 是内容块数组，块类型有 `thinking`、`text`、`toolCall`（带 `name`、`arguments`、`toolCallId`）、`toolResult`（带 `toolCallId`）、`image`（带 `mimeType` 与取图地址 `url`，`url` 为空时页面不渲染该块）；`text` 是全部块拼成的纯文本，供简单渲染使用。用户消息由 `/skill:名称 参数` 展开而来时带 `skill: {name, location}`，此时 `text` 只是参数部分，技能全文不下发。图片块**不带** base64 内容：十几 MB 的图片会把单帧撑过上限、导致整帧被丢掉，所以历史里的图片由页面按 `url` 去 `/api/image` 懒加载。`entryId` 是会话树里这条消息所在条目的 id（老版本 SDK 或取不到时为空串），页面按它定位 `/rewind` 的回退目标、并把耗时挂回对应行。助手消息可能额外带 `durationMs`（该次模型调用耗时），用户消息可能额外带 `turnMs`（该回合总耗时），都来自旁边的耗时文件（见“耗时显示”）。`role` 为 `toolResult` 的消息额外带消息级字段 `toolCallId`、`toolName` 与 `isError`（页面据此把输出归到对应调用并显示失败标记），以及 `edit` 的展示用 `diff`。
 
-默认不转发 `tool_execution_update`、`message_start`、`turn_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
+默认不转发 `tool_execution_update`、`message_start` 这类高频/噪声事件；设 `PIGUI_DEBUG=1` 可拿到全部事件（并额外输出调试日志）。
 
 ## 会话目录与并发注意
 

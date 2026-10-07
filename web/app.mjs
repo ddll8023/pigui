@@ -191,7 +191,11 @@ function handleFrame(frame) {
 			}
 			return;
 		}
-		if (type === 'turn_start') return;
+		if (type === 'turn_start') {
+			// 每次模型请求发出前都会到这里：工具跑完后的等待也要有反馈，直到下一段输出到达
+			messages.startResponseWaiting();
+			return;
+		}
 		if (type === 'tool_execution_start') {
 			messages.startToolRow(detail);
 			return;
