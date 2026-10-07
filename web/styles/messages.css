@@ -213,14 +213,8 @@ main {
 	color: var(--muted);
 }
 .assistant-waiting-label {
-	position: absolute;
-	width: 1px;
-	height: 1px;
-	padding: 0;
-	border: 0;
-	overflow: hidden;
-	clip-path: inset(50%);
-	white-space: nowrap;
+	margin-right: 4px;
+	font-size: calc(12px * var(--font-scale));
 }
 .assistant-waiting-dot {
 	flex: none;

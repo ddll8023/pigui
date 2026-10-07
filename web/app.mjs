@@ -72,6 +72,8 @@ function handleOverlayKey(event) {
 composer = createComposer({
 	addStatusRow: messages.addStatusRow,
 	addUserMessage: messages.addUserMessage,
+	startResponseWaiting: messages.startResponseWaiting,
+	stopResponseWaiting: messages.stopResponseWaiting,
 	pinnedToBottom: messages.pinnedToBottom,
 	followFrame: messages.followFrame,
 	syncJumpPosition: navigation.syncJumpPosition,
@@ -151,7 +153,8 @@ function handleFrame(frame) {
 			return;
 		}
 		if (frame.kind === 'error') {
-			messages.addStatusRow(String(frame.message || '未知错误'), 'error');
+			const message = String(frame.message || '未知错误');
+			if (!messages.stopResponseWaiting('响应失败：' + message)) messages.addStatusRow(message, 'error');
 			return;
 		}
 		if (frame.kind !== 'event') return;
@@ -249,6 +252,7 @@ function connect() {
 	// 断连期间更新顶栏，浏览器负责自动重连；绑定失效时刷新页面换个新对话。
 	source.onerror = () => {
 		metaEl.textContent = '连接中断，正在重试…';
+		messages.stopResponseWaiting('连接中断，正在重试…');
 		setBusy(false);
 		verifyConversation();
 	};

@@ -2,7 +2,7 @@
 import { apiPath } from './conversation.mjs';
 
 /** 创建编辑器、补全与附件发送；状态由实例自己维护。 */
-export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
+export function createComposer({ addStatusRow, addUserMessage, startResponseWaiting, stopResponseWaiting, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
 	const inputEl = document.getElementById('input');
 	const sendEl = document.getElementById('send');
 	const cmdbarEl = document.getElementById('cmdbar');
@@ -336,6 +336,7 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		try {
 			const response = await fetch(apiPath('/api/abort'), { method: 'POST' });
 			if (!response.ok) throw new Error('HTTP ' + response.status);
+			stopResponseWaiting('响应已中止。');
 		} catch (err) {
 			addStatusRow('中止失败：' + String((err && err.message) || err), 'error');
 		}
@@ -579,12 +580,25 @@ export function createComposer({ addStatusRow, addUserMessage, pinnedToBottom, f
 		// revoke=false：本地回显的缩略图还在用这些 blob URL
 		clearAttachments({ revoke: false });
 		addUserMessage(text, previews);
+		// steer 不创建第二个助手行；插件命令可能直接处理完毕，不一定会发起模型请求。
+		const extensionCommand = remoteCommands.some((command) => command.name === head && command.source === 'extension');
+		const waiting = !runBusy && !extensionCommand ? startResponseWaiting() : null;
 		followFrame(pinnedToBottom());
-		await fetch(apiPath('/api/prompt'), {
-			method: 'POST',
-			headers: { 'content-type': 'application/json' },
-			body: JSON.stringify(images.length ? { message: text, images } : { message: text }),
-		}).catch(() => addStatusRow('发送失败：本地服务没有响应', 'error'));
+		try {
+			const response = await fetch(apiPath('/api/prompt'), {
+				method: 'POST',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify(images.length ? { message: text, images } : { message: text }),
+			});
+			if (!response.ok) {
+				const result = await response.json().catch(() => null);
+				throw new Error(String(result?.error || 'HTTP ' + response.status));
+			}
+		} catch (err) {
+			const reason = err instanceof TypeError ? '本地服务没有响应' : String(err?.message || err);
+			const message = '发送失败：' + reason;
+			if (!stopResponseWaiting(message, waiting)) addStatusRow(message, 'error');
+		}
 	}
 
 	/** 输入框按内容自动增高（1～8 行左右）；未到上限时不出现滚动条。 */

@@ -35,6 +35,12 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 	/** 会话工作目录；只用于把工具参数里的绝对路径裁成相对路径显示。 */
 	let cwd = '';
 
+	/** 最近的会话快照；历史重放结束后恢复回合计时与首响应等待提示。 */
+	let sessionContext = null;
+
+	/** 历史中最后一条用户、助手或工具结果的角色；据此判断模型是否还欠一次响应。 */
+	let lastHistoryRole = '';
+
 	/** 本地已画出、还在等服务端回显的用户行：{ text, row }，按发送顺序排队。 */
 	let pendingUserRows = [];
 
@@ -115,6 +121,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		toolRecords.clear();
 		pendingUserRows = [];
 		historyRows = 0;
+		lastHistoryRole = '';
 		showEmptyHint();
 	}
 
@@ -692,6 +699,29 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		syncJumpButtons();
 	}
 
+	/** 发送时立即占用后续助手行；返回本次等待的引用，失败回调不能清除其他请求的提示。 */
+	function startResponseWaiting() {
+		if (pendingAssistant) return null;
+		return ensurePendingAssistant();
+	}
+
+	/** 仅结束尚无可展示输出的等待；保留原因，已开始生成或已切换的消息不受影响。 */
+	function stopResponseWaiting(text, target = pendingAssistant) {
+		if (!target || target !== pendingAssistant || !target.waiting) return false;
+		cancelStreamRender(streaming);
+		removeAssistantWaiting();
+		settleRowTimer(target.row, NaN);
+		const note = document.createElement('div');
+		note.className = 'misc';
+		note.setAttribute('role', 'status');
+		note.textContent = text;
+		target.body.replaceChildren(note);
+		pendingAssistant = null;
+		streaming = null;
+		thinkingRow = null;
+		return true;
+	}
+
 	/** 同一条流式助手消息只创建一个身份行，不因思考与工具切换重复占号。 */
 	function ensurePendingAssistant() {
 		if (!pendingAssistant) {
@@ -865,6 +895,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		if (frame.kind === 'history') {
 			if (!frame.part) clearMessages();
 			for (const message of frame.messages || []) {
+				if (['user', 'assistant', 'toolResult'].includes(message.role)) lastHistoryRole = message.role;
 				try {
 					if (renderMessage(message)) historyRows += 1;
 				} catch (err) {
@@ -874,6 +905,11 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 			if ((frame.part || 0) === (frame.parts || 1) - 1) {
 				if (!historyRows) showEmptyHint();
 				if (!isBusy()) finishPendingTools();
+				resumeTurn(sessionContext);
+				// 用户消息与工具结果都表示模型还欠一次响应；助手历史已落定，不再创建等待行。
+				if (isBusy() && sessionContext?.busy && !sessionContext.compacting && (lastHistoryRole === 'user' || lastHistoryRole === 'toolResult')) {
+					startResponseWaiting();
+				}
 			}
 			return true;
 		}
@@ -909,7 +945,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 
 	/** 刷新或重连时，将活跃回合计时接回对应提问行。 */
 	function resumeTurn(context) {
-		if (!context.turn || !Number.isFinite(context.turn.startedAt)) return;
+		if (!context?.busy || !context.turn || !Number.isFinite(context.turn.startedAt)) return;
 		const row = rowByEntryId(context.turn.entryId) || lastUserRow();
 		if (row) {
 			turnTimerRow = row;
@@ -926,6 +962,7 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		finishPendingTools();
 		// 中止或回合结束不会再收到完整消息，先把挂起的增量落定
 		flushStreamRender(streaming);
+		stopResponseWaiting('本回合已结束，未收到模型响应。');
 		if (pendingAssistant) {
 			removeAssistantWaiting();
 			settleRowTimer(pendingAssistant.row, NaN);
@@ -936,9 +973,10 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		thinkingRow = null;
 	}
 
-	/** 接收会话上下文，只取工作目录用于工具路径显示。 */
+	/** 接收工作目录与运行快照；历史重放后再恢复等待提示，避免它被清空或重复追加。 */
 	function setContext(context) {
 		cwd = String(context?.cwd || '');
+		sessionContext = context;
 	}
 
 	/** 帧处理后按处理前的滚动意图跟随底部，并更新跳转按钮。 */
@@ -947,5 +985,5 @@ export function createMessages({ isBusy, syncJumpButtons }) {
 		syncJumpButtons();
 	}
 
-	return { clearMessages, showEmptyHint, addStatusRow, addUserMessage, handleFrame, resumeTurn, finishTurn, followFrame, pinnedToBottom, startToolRow, endToolRow, setContext };
+	return { clearMessages, showEmptyHint, addStatusRow, addUserMessage, startResponseWaiting, stopResponseWaiting, handleFrame, resumeTurn, finishTurn, followFrame, pinnedToBottom, startToolRow, endToolRow, setContext };
 }
