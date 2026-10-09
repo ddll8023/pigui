@@ -22,6 +22,8 @@
 .composer-actions { display: flex; flex: none; align-items: center; gap: 7px; }
 #attach { width: 34px; height: 34px; padding: 0; font-size: calc(18px * var(--font-scale)); line-height: 1; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
 #attach:hover { background: var(--think-bg); }
+#quickConfirm { height: 34px; padding: 0 10px; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
+#quickConfirm:hover { background: var(--think-bg); }
 /* 状态与用量占据工具栏左侧；操作组固定在右侧，不压缩发送按钮。 */
 .composer-meta {
 	flex: 1;

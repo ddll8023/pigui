@@ -5,6 +5,7 @@ import { apiPath } from './conversation.mjs';
 export function createComposer({ addStatusRow, addUserMessage, startResponseWaiting, stopResponseWaiting, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
 	const inputEl = document.getElementById('input');
 	const sendEl = document.getElementById('send');
+	const quickConfirmEl = document.getElementById('quickConfirm');
 	const cmdbarEl = document.getElementById('cmdbar');
 	const cmdListEl = document.getElementById('cmdList');
 	const filebarEl = document.getElementById('filebar');
@@ -558,9 +559,10 @@ export function createComposer({ addStatusRow, addUserMessage, startResponseWait
 	}
 
 	/** 发送一条消息（运行中时服务端会自动转为 steer）；图片附件随消息一起发。 */
-	async function send() {
-		const text = inputEl.value.trim();
-		const images = imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
+	async function send(messageOverride = null) {
+		const quickSend = messageOverride !== null;
+		const text = quickSend ? messageOverride : inputEl.value.trim();
+		const images = quickSend ? [] : imageAttachments().map((item) => ({ data: item.base64, mimeType: item.mimeType }));
 		if (!text && !images.length) return;
 		if (isCompacting()) {
 			addStatusRow('会话正在压缩，请等待压缩结束', 'error');
@@ -574,11 +576,13 @@ export function createComposer({ addStatusRow, addUserMessage, startResponseWait
 			return;
 		}
 		// 发送前先留下本地缩略图信息，清单清空后再画本地行
-		const previews = imageAttachments().map((item) => ({ objectUrl: item.objectUrl, mimeType: item.mimeType }));
-		inputEl.value = '';
-		autoGrow();
-		// revoke=false：本地回显的缩略图还在用这些 blob URL
-		clearAttachments({ revoke: false });
+		const previews = quickSend ? [] : imageAttachments().map((item) => ({ objectUrl: item.objectUrl, mimeType: item.mimeType }));
+		if (!quickSend) {
+			inputEl.value = '';
+			autoGrow();
+			// revoke=false：本地回显的缩略图还在用这些 blob URL
+			clearAttachments({ revoke: false });
+		}
 		addUserMessage(text, previews);
 		// steer 不创建第二个助手行；插件命令可能直接处理完毕，不一定会发起模型请求。
 		const extensionCommand = remoteCommands.some((command) => command.name === head && command.source === 'extension');
@@ -632,6 +636,7 @@ export function createComposer({ addStatusRow, addUserMessage, startResponseWait
 			if (sendEl.dataset.mode === 'abort') void abortRun();
 			else void send();
 		});
+		quickConfirmEl.addEventListener('click', () => void send('确认'));
 		inputEl.addEventListener('input', () => {
 			autoGrow();
 			renderSendState();
