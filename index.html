@@ -81,7 +81,16 @@
 					</div>
 					<div class="composer-actions">
 						<button id="attach" type="button" title="添加附件（也可拖拽或粘贴图片）" aria-label="添加附件">＋</button>
-						<button id="quickConfirm" type="button" title="直接发送：确认">确认</button>
+						<div class="quick-send">
+							<button id="quickSendToggle" type="button" aria-haspopup="listbox" aria-expanded="false" aria-controls="quickSendMenu" title="选择并直接发送快捷消息">
+								<span id="quickSendLabel">确认</span><span aria-hidden="true">▾</span>
+							</button>
+							<div class="quick-send-menu" id="quickSendMenu" role="listbox" aria-label="快捷消息" hidden>
+								<button class="quick-send-option" type="button" role="option" aria-selected="true" data-message="确认">确认</button>
+								<button class="quick-send-option" type="button" role="option" aria-selected="false" data-message="提交">提交</button>
+								<button class="quick-send-option" type="button" role="option" aria-selected="false" data-message="推送">推送</button>
+							</div>
+						</div>
 						<button id="send" type="button" title="Enter 发送 · Shift+Enter 换行" aria-label="发送">↑</button>
 					</div>
 				</div>

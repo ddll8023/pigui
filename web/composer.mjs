@@ -5,7 +5,10 @@ import { apiPath } from './conversation.mjs';
 export function createComposer({ addStatusRow, addUserMessage, startResponseWaiting, stopResponseWaiting, pinnedToBottom, followFrame, syncJumpPosition, openSessionPicker, openModelPicker, openRewind, newSession, openSettings, getFontScale, isCompacting, isSessionPickerOpen, isOverlayOpen, handleOverlayKey }) {
 	const inputEl = document.getElementById('input');
 	const sendEl = document.getElementById('send');
-	const quickConfirmEl = document.getElementById('quickConfirm');
+	const quickSendToggleEl = document.getElementById('quickSendToggle');
+	const quickSendLabelEl = document.getElementById('quickSendLabel');
+	const quickSendMenuEl = document.getElementById('quickSendMenu');
+	const quickSendOptions = [...quickSendMenuEl.querySelectorAll('.quick-send-option')];
 	const cmdbarEl = document.getElementById('cmdbar');
 	const cmdListEl = document.getElementById('cmdList');
 	const filebarEl = document.getElementById('filebar');
@@ -630,13 +633,55 @@ export function createComposer({ addStatusRow, addUserMessage, startResponseWait
 		if (caret) inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
 	}
 
+	/** 展开或收起快捷发送选项。 */
+	function setQuickSendMenuOpen(open) {
+		quickSendMenuEl.hidden = !open;
+		quickSendToggleEl.setAttribute('aria-expanded', String(open));
+	}
+
 	/** 初始化输入、附件和补全监听，不接管浮层内部键位。 */
 	function init() {
 		sendEl.addEventListener('click', () => {
 			if (sendEl.dataset.mode === 'abort') void abortRun();
 			else void send();
 		});
-		quickConfirmEl.addEventListener('click', () => void send('确认'));
+		quickSendToggleEl.addEventListener('click', () => {
+			const isOpen = quickSendToggleEl.getAttribute('aria-expanded') === 'true';
+			setQuickSendMenuOpen(!isOpen);
+		});
+		quickSendToggleEl.addEventListener('keydown', (event) => {
+			if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+			event.preventDefault();
+			setQuickSendMenuOpen(true);
+			quickSendOptions[event.key === 'ArrowDown' ? 0 : quickSendOptions.length - 1]?.focus();
+		});
+		quickSendMenuEl.addEventListener('click', (event) => {
+			const option = event.target.closest('.quick-send-option');
+			if (!option) return;
+			const message = option.dataset.message;
+			quickSendLabelEl.textContent = message;
+			quickSendOptions.forEach((item) => item.setAttribute('aria-selected', String(item === option)));
+			setQuickSendMenuOpen(false);
+			quickSendToggleEl.focus();
+			void send(message);
+		});
+		quickSendMenuEl.addEventListener('keydown', (event) => {
+			if (event.key === 'Escape') {
+				event.preventDefault();
+				setQuickSendMenuOpen(false);
+				quickSendToggleEl.focus();
+				return;
+			}
+			if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+			event.preventDefault();
+			const currentIndex = quickSendOptions.indexOf(document.activeElement);
+			const delta = event.key === 'ArrowDown' ? 1 : -1;
+			const nextIndex = (currentIndex + delta + quickSendOptions.length) % quickSendOptions.length;
+			quickSendOptions[nextIndex].focus();
+		});
+		document.addEventListener('pointerdown', (event) => {
+			if (!event.target.closest('.quick-send')) setQuickSendMenuOpen(false);
+		});
 		inputEl.addEventListener('input', () => {
 			autoGrow();
 			renderSendState();

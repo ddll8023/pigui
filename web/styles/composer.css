@@ -22,8 +22,24 @@
 .composer-actions { display: flex; flex: none; align-items: center; gap: 7px; }
 #attach { width: 34px; height: 34px; padding: 0; font-size: calc(18px * var(--font-scale)); line-height: 1; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
 #attach:hover { background: var(--think-bg); }
-#quickConfirm { height: 34px; padding: 0 10px; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
-#quickConfirm:hover { background: var(--think-bg); }
+.quick-send { position: relative; }
+#quickSendToggle { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 10px; border-color: var(--line-strong); border-radius: 9px; background: var(--panel); }
+#quickSendToggle:hover { background: var(--think-bg); }
+.quick-send-menu {
+	position: absolute;
+	right: 0;
+	bottom: calc(100% + 8px);
+	z-index: 9;
+	min-width: 110px;
+	padding: 4px;
+	background: var(--panel);
+	border: 1px solid var(--line-strong);
+	border-radius: 8px;
+	box-shadow: var(--floating-shadow);
+}
+.quick-send-menu[hidden] { display: none; }
+.quick-send-option { display: block; width: 100%; padding: 8px 10px; text-align: left; }
+.quick-send-option[aria-selected="true"] { color: var(--accent); background: var(--think-bg); }
 /* 状态与用量占据工具栏左侧；操作组固定在右侧，不压缩发送按钮。 */
 .composer-meta {
 	flex: 1;
